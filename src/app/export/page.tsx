@@ -1,10 +1,11 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Download, FileArchive, FileImage, FileJson, FileText, Lock, Package, Printer, ShieldAlert, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileArchive, FileImage, FileJson, FileText, Package, Printer, ShieldAlert, XCircle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { EmptyState, fmtBytes, fmtDateTime, PageHeader } from "@/components/common";
+import { InDesignJobCard } from "@/components/export/InDesignPanel";
 import { PageRenderer } from "@/components/page/PageRenderer";
 import { toast } from "@/components/shell/toast";
 import { Badge, Button, Card, CardHeader, cn, Field, Input, Progress, Segmented, Switch } from "@/components/ui";
@@ -13,6 +14,7 @@ import { useQa } from "@/lib/hooks";
 import { resolvePage } from "@/lib/layout-engine";
 import { useStore } from "@/lib/store";
 import type { ExportFormat, ExportJob, ExportSettings } from "@/lib/types";
+import { fetchReadiness, integrationState, startInDesignJob, type ServerReadiness } from "@/services/indesign";
 
 interface FormatDef {
   id: ExportFormat;
@@ -29,10 +31,12 @@ const FORMATS: FormatDef[] = [
   { id: "pdf-web", label: "Web PDF", description: "Compressed, screen-resolution PDF for email and web sharing.", icon: <FileText />, ext: "pdf", available: true },
   { id: "png-pages", label: "Page preview images", description: "One PNG per page in a ZIP — for social, approvals and CMS.", icon: <FileImage />, ext: "zip", available: true },
   { id: "json-package", label: "Structured content package", description: "JSON: page definitions, text, image references and styles.", icon: <FileJson />, ext: "json", available: true },
-  { id: "indesign-handoff", label: "InDesign handoff package", description: "ZIP manifest (points, styles, threading), tagged stories and image links for a future InDesign script. No .indd inside.", icon: <Package />, ext: "zip", available: true },
-  { id: "pdf-print", label: "Print-ready PDF (PDF/X-1a)", description: "CMYK, embedded fonts, PDF/X conformance.", icon: <Printer />, ext: "pdf", available: false, note: "Requires connected InDesign service" },
-  { id: "indd-native", label: "Native InDesign document (.indd)", description: "Editable InDesign file with styles and threaded frames.", icon: <Lock />, ext: "indd", available: false, note: "InDesign integration — demo only" },
+  { id: "indesign-handoff", label: "InDesign build package", description: "ZIP with the exact InDesign build manifest (points, paragraph styles, threading), stories and image links. No .indd inside.", icon: <Package />, ext: "zip", available: true },
+  { id: "pdf-print", label: "Print-ready PDF via InDesign", description: "Built by Adobe InDesign in the cloud: real paragraph styles, InDesign composition, Adobe preflight, PDF/X with bleed and crop marks, plus page previews.", icon: <Printer />, ext: "pdf", available: false },
+  { id: "indd-native", label: "InDesign documents (.indd + .idml)", description: "Editable InDesign files with paragraph styles and threaded stories, plus a print PDF and page previews.", icon: <Package />, ext: "indd", available: false },
 ];
+
+const INDESIGN: ExportFormat[] = ["pdf-print", "indd-native"];
 
 const RASTER: ExportFormat[] = ["pdf-proof", "pdf-web", "png-pages"];
 
@@ -50,6 +54,11 @@ function ExportCenter() {
   const uploads = useStore((s) => s.uploads);
   const jobs = useStore((s) => s.exportJobs);
   const defaults = useStore((s) => s.settings.exportDefaults);
+  const settings = useStore((s) => s.settings);
+  const [server, setServer] = useState<ServerReadiness | null>(null);
+  useEffect(() => void fetchReadiness().then(setServer), []);
+  const indesign = integrationState(settings, server);
+  const formats = FORMATS.map((f) => (INDESIGN.includes(f.id) ? { ...f, available: indesign.usable, note: indesign.usable ? undefined : indesign.reason } : f));
   const addJob = useStore((s) => s.addExportJob);
   const log = useStore((s) => s.log);
   const pub = ctx.publication;
@@ -85,8 +94,9 @@ function ExportCenter() {
   const errs = selIssues.filter((i) => i.severity === "error");
   const warns = selIssues.filter((i) => i.severity === "warning");
   const unapproved = pages.filter((p) => selected.includes(p.number) && p.status !== "approved").length;
-  const fmt = FORMATS.find((f) => f.id === cfg.format)!;
+  const fmt = formats.find((f) => f.id === cfg.format)!;
   const isRaster = RASTER.includes(cfg.format);
+  const isInDesign = INDESIGN.includes(cfg.format);
   const blocked = errs.length > 0 && !cfg.allowWithErrors && cfg.format !== "json-package";
   const busy = !!progress;
 
@@ -121,6 +131,7 @@ function ExportCenter() {
       record("blocked", `${base}-${rangeLabel}.${fmt.ext}`, undefined, undefined, msg);
       return;
     }
+    if (isInDesign) return runInDesign();
     const t0 = performance.now();
     let blob: Blob;
     let name = `${base}-${rangeLabel}`;
@@ -132,7 +143,7 @@ function ExportCenter() {
         name += "-content-package.json";
       } else if (cfg.format === "indesign-handoff") {
         setProgress({ label: "Building manifest, stories and links…", value: 40 });
-        blob = await buildHandoffZip(ctx, uploads, selected, issues, cfg);
+        blob = await buildHandoffZip(ctx, uploads, selected, issues);
         name += "-indesign-handoff.zip";
       } else {
         setProgress({ label: "Preparing pages…", value: 2 });
@@ -167,11 +178,43 @@ function ExportCenter() {
     }
   };
 
+  const runInDesign = async () => {
+    const name = `${base}-${rangeLabel}${cfg.format === "pdf-print" ? "-print" : "-indesign"}`;
+    const id = `exp-${Date.now()}`;
+    setProgress({ label: "Preparing the InDesign job…", value: 10 });
+    try {
+      const outputs = cfg.format === "pdf-print" ? { pdf: true, indd: false, idml: false, jpeg: true } : { pdf: true, indd: true, idml: true, jpeg: true };
+      const res = await startInDesignJob(ctx, uploads, selected, settings, outputs, (label) => setProgress({ label, value: 40 }));
+      addJob({
+        id,
+        publicationId: pub.id,
+        format: cfg.format,
+        fileName: name,
+        pages: selected,
+        status: "running",
+        createdAt: new Date().toISOString(),
+        qa: { errors: errs.length, warnings: warns.length },
+        settings: cfg,
+        indesign: { jobId: res.jobId, stage: "Queued at Adobe", outputs: [] },
+      });
+      log({ kind: "export", message: `InDesign build started — ${res.pages} pages, ${res.links} images, ${res.fonts} font files`, actor: "Adobe InDesign API" });
+      toast("info", "InDesign build started", "Adobe InDesign is building the pages. Results appear here when it finishes.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`Could not start the InDesign build: ${msg}`);
+      record("failed", name, undefined, undefined, msg);
+      toast("error", "InDesign build not started", msg);
+    } finally {
+      setProgress(null);
+    }
+  };
+  const indesignJobs = jobs.filter((j) => j.publicationId === pub.id && j.indesign).slice(0, 3);
+
   return (
     <div className="mx-auto max-w-[1400px] space-y-5 p-6 lg:p-8">
       <PageHeader
         title="Export Center"
-        description="Every option listed as available produces a real downloadable file from the browser. Native InDesign and print-certified outputs require a connected InDesign service."
+        description="Proofs and data packages are produced in the browser. Print-ready PDF/X and native InDesign files are built by Adobe InDesign in the cloud once the integration is set up in Settings."
         actions={
           <Button href={`/proof?pages=${encodeURIComponent(selected.length ? (cfg.range === "all" ? `1-${pages.length}` : cfg.customRange) : "1")}`}>
             <Printer /> Open print view (vector)
@@ -184,7 +227,7 @@ function ExportCenter() {
           <Card>
             <CardHeader title="Format" description={`${pub.title} — ${pub.issueLabel}`} />
             <div className="grid gap-2.5 p-4 md:grid-cols-2">
-              {FORMATS.map((f) => (
+              {formats.map((f) => (
                 <button
                   key={f.id}
                   disabled={!f.available || busy}
@@ -242,10 +285,14 @@ function ExportCenter() {
                 <Toggle label="Crop marks & slug" hint="Trim marks and a proof label in the slug area." checked={cfg.cropMarks} disabled={cfg.format !== "pdf-proof"} onChange={(v) => set({ cropMarks: v })} />
                 <Toggle label="Embed fonts" hint={isRaster ? "Browser PDFs are raster — text is rendered as pixels, so fonts are not embedded." : "Font names are referenced; licensed font files are never packaged."} checked={false} disabled onChange={() => undefined} />
                 <Toggle label="Include QA report" hint="Adds open findings to JSON / handoff packages." checked={cfg.includeQaReport} disabled={isRaster} onChange={(v) => set({ includeQaReport: v })} />
-                <Toggle label="Allow export with QA errors" hint="Proofs only. Print exports always require a clean preflight." checked={cfg.allowWithErrors} onChange={(v) => set({ allowWithErrors: v })} />
+                <Toggle label="Allow export with QA errors" hint="Otherwise exports are blocked while QA errors remain on the selected pages." checked={cfg.allowWithErrors} onChange={(v) => set({ allowWithErrors: v })} />
               </div>
             </div>
           </Card>
+
+          {indesignJobs.map((j) => (
+            <InDesignJobCard key={j.id} job={j} />
+          ))}
 
           <Card>
             <CardHeader title="Export history" description="Recorded in this browser" />
@@ -271,14 +318,14 @@ function ExportCenter() {
                         <td className="max-w-[280px] truncate px-5 py-2.5 font-medium text-ink" title={j.message ?? j.fileName}>
                           {j.fileName}
                         </td>
-                        <td className="px-3 py-2.5 text-ink-2">{FORMATS.find((f) => f.id === j.format)?.label}</td>
+                        <td className="px-3 py-2.5 text-ink-2">{formats.find((f) => f.id === j.format)?.label}</td>
                         <td className="px-3 py-2.5 tabular-nums text-ink-2">{j.pages.length === 1 ? j.pages[0] : `${j.pages[0]}–${j.pages[j.pages.length - 1]} (${j.pages.length})`}</td>
                         <td className="px-3 py-2.5 tabular-nums text-ink-2">{fmtBytes(j.sizeBytes)}</td>
                         <td className="px-3 py-2.5 text-ink-2">
                           {j.qa.errors} E · {j.qa.warnings} W
                         </td>
                         <td className="px-3 py-2.5">
-                          <Badge tone={j.status === "completed" ? "ok" : j.status === "blocked" ? "warn" : "err"}>{j.status}</Badge>
+                          <Badge tone={j.status === "completed" ? "ok" : j.status === "running" ? "brand" : j.status === "blocked" ? "warn" : "err"}>{j.status}</Badge>
                         </td>
                         <td className="px-3 py-2.5 whitespace-nowrap text-muted">{fmtDateTime(j.createdAt)}</td>
                       </tr>
@@ -297,7 +344,12 @@ function ExportCenter() {
               <Row ok={!errs.length} icon={errs.length ? <XCircle className="size-4 text-err" /> : <CheckCircle2 className="size-4 text-ok" />} label={errs.length ? `${errs.length} QA error${errs.length > 1 ? "s" : ""}` : "No QA errors"} detail={errs.slice(0, 2).map((e) => e.title).join(" · ")} />
               <Row ok={!warns.length} icon={warns.length ? <AlertTriangle className="size-4 text-warn" /> : <CheckCircle2 className="size-4 text-ok" />} label={warns.length ? `${warns.length} warning${warns.length > 1 ? "s" : ""}` : "No warnings"} />
               <Row ok={!unapproved} icon={unapproved ? <AlertTriangle className="size-4 text-warn" /> : <CheckCircle2 className="size-4 text-ok" />} label={unapproved ? `${unapproved} page${unapproved > 1 ? "s" : ""} not yet approved` : "All pages approved"} />
-              <Row ok icon={<ShieldAlert className="size-4 text-info" />} label="Browser output" detail={isRaster ? `RGB raster at ≈${ppiFor(cfg.quality)} ppi — for review, not press.` : "Data package — not an InDesign document."} />
+              <Row
+                ok
+                icon={<ShieldAlert className="size-4 text-info" />}
+                label={isInDesign ? "Adobe InDesign output" : "Browser output"}
+                detail={isInDesign ? `Built in InDesign · ${settings.integration.pdfPreset ?? "[PDF/X-4:2008]"} with bleed and crop marks · Adobe preflight` : isRaster ? `RGB raster at ≈${ppiFor(cfg.quality)} ppi — for review, not press.` : "Data package — not an InDesign document."}
+              />
             </div>
             <div className="border-t border-line p-5">
               {progress ? (

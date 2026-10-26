@@ -1,196 +1,144 @@
+"use client";
+
 /**
- * Adobe InDesign integration boundary.
+ * Browser client for the Adobe InDesign API pipeline (see src/server/indesign).
  *
- * In this demo, page generation runs in the browser (`layout-engine.ts`) and
- * nothing talks to InDesign. This module defines the contract a real
- * integration would implement — InDesign Server (SOAP/ExtendScript), a UXP
- * plugin in InDesign desktop, or Adobe's cloud InDesign APIs — and builds the
- * script-ready manifest that such a service would consume.
- *
- * No connection is ever simulated as successful: `testConnection` performs a
- * real HTTP request and reports exactly what happened.
+ * The browser builds the manifest from the live page model, makes sure
+ * uploaded images are staged on the server, starts the job and polls it.
+ * Composition, preflight and PDF/X / INDD / IDML export happen in InDesign.
  */
 
-import { MM_PER_PT, paragraphStyles } from "@/lib/design-tokens";
-import { fontDisplayNames } from "@/lib/fonts";
-import { findImage, linkName } from "@/lib/images";
-import { resolvePage, storyBody, storyPages, type LayoutContext } from "@/lib/layout-engine";
-import { parseBody } from "@/lib/text-engine";
+import { buildInDesignManifestV2 } from "@/lib/indesign/build-manifest";
+import type { BuildOptions, InDesignManifestV2, JobView } from "@/lib/indesign/manifest-types";
+import { findImage } from "@/lib/images";
+import type { LayoutContext } from "@/lib/layout-engine";
 import type { ImageAsset, Settings } from "@/lib/types";
 
-export type IntegrationMode = Settings["integration"]["mode"];
-
-export interface IntegrationStatus {
-  mode: IntegrationMode;
-  connected: false | true;
-  label: string;
-  detail: string;
-  nativeDocuments: boolean;
+export interface ServerReadiness {
+  adobe: boolean;
+  storage: boolean;
+  apiKey: boolean;
+  ready: boolean;
+  missing: string[];
+  script: { name: string; version: string };
 }
 
-/** Operations a real InDesign service must provide to replace the browser engine. */
-export interface InDesignService {
-  /** Build or update native pages from a manifest; returns document/job identifiers. */
-  buildDocument(manifest: InDesignManifest): Promise<{ jobId: string; documentUrl?: string }>;
-  /** Run an InDesign preflight profile and return its findings. */
-  preflight(jobId: string, profile: string): Promise<{ errors: number; warnings: number; report: unknown }>;
-  /** Export PDF/X or packaged .indd from a built document. */
-  exportDocument(jobId: string, preset: "PDF/X-1a:2001" | "PDF/X-4:2008" | "IDML" | "INDD-package"): Promise<{ downloadUrl: string }>;
+export interface IntegrationState {
+  /** Server env is complete, the app is set to use it and has the access key. */
+  usable: boolean;
+  reason?: string;
 }
 
-export function integrationStatus(settings: Settings): IntegrationStatus {
-  if (settings.integration.mode === "browser-demo" || !settings.integration.endpoint.trim()) {
-    return {
-      mode: "browser-demo",
-      connected: false,
-      label: "Browser demo mode",
-      detail: "Layouts are generated and previewed in the browser. InDesign service not connected — native document generation unavailable.",
-      nativeDocuments: false,
-    };
-  }
-  return {
-    mode: settings.integration.mode,
-    connected: false,
-    label: "Endpoint configured — not verified",
-    detail: "An endpoint is saved but no successful handshake has been recorded. Use “Test connection”.",
-    nativeDocuments: false,
-  };
-}
+export const PDF_PRESETS = ["[PDF/X-4:2008]", "[PDF/X-1a:2001]", "[PDF/X-3:2002]", "[Press Quality]", "[High Quality Print]"];
 
-/** Real network check against `${endpoint}/health`. Never fabricates success. */
-export async function testConnection(endpoint: string, timeoutMs = 5000): Promise<{ ok: boolean; message: string }> {
-  let url: URL;
+export async function fetchReadiness(): Promise<ServerReadiness | null> {
   try {
-    url = new URL("health", endpoint.endsWith("/") ? endpoint : `${endpoint}/`);
+    const res = await fetch("/api/indesign/status", { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as ServerReadiness;
   } catch {
-    return { ok: false, message: "That is not a valid URL." };
-  }
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: ctrl.signal });
-    if (!res.ok) return { ok: false, message: `Service responded with HTTP ${res.status}.` };
-    return { ok: true, message: `Health endpoint responded (HTTP ${res.status}). Document generation is still not wired in this demo build.` };
-  } catch (e) {
-    return { ok: false, message: e instanceof DOMException && e.name === "AbortError" ? "No response within 5 seconds." : "Could not reach the service (network error or CORS)." };
-  } finally {
-    clearTimeout(t);
+    return null;
   }
 }
 
-/* ------------------------------------------------------------- manifest */
-
-const pt = (mm: number) => Math.round((mm / MM_PER_PT) * 100) / 100;
-
-export interface InDesignManifest {
-  schema: "pressflow.indesign-manifest/1";
-  document: {
-    name: string;
-    pageWidthPt: number;
-    pageHeightPt: number;
-    bleedPt: number;
-    exportWithBleed: boolean;
-    facingPages: boolean;
-    marginsPt: { top: number; bottom: number; inside: number; outside: number };
-    columns: number;
-    gutterPt: number;
-    startPageNumber: number;
-  };
-  paragraphStyles: { name: string; fontFamily: string; fontStyle: string; pointSize: number; leading: number; tracking: number; justification: string; fillColor: string; capitalization: string }[];
-  pages: {
-    number: number;
-    side: "left" | "right";
-    master: string;
-    frames: {
-      id: string;
-      type: "TextFrame" | "Rectangle" | "Graphic";
-      label: string;
-      boundsPt: [number, number, number, number];
-      columns?: number;
-      gutterPt?: number;
-      story?: string;
-      threadIndex?: number;
-      contents?: string;
-      appliedParagraphStyle?: string;
-      localOverrides?: Record<string, unknown>;
-      link?: string;
-      fitting?: "FILL_PROPORTIONALLY" | "PROPORTIONALLY";
-      fill?: string;
-    }[];
-  }[];
-  stories: { id: string; articleId: string; pages: number[]; frames: string[]; taggedText: string }[];
+export function integrationState(settings: Settings, server: ServerReadiness | null): IntegrationState {
+  if (settings.integration.mode !== "adobe-indesign-api") return { usable: false, reason: "Switch Settings → InDesign integration to “Adobe InDesign API”." };
+  if (!server) return { usable: false, reason: "Server status unavailable." };
+  if (!server.ready) return { usable: false, reason: `Server not configured: ${server.missing.join(", ")}.` };
+  if (!settings.integration.accessKey?.trim()) return { usable: false, reason: "Enter the PressFlow access key in Settings → InDesign integration." };
+  return { usable: true };
 }
 
-export function buildInDesignManifest(ctx: LayoutContext, uploads: ImageAsset[], pageNumbers: number[], opts: { bleed: boolean }): InDesignManifest {
-  const s = ctx.settings.page;
-  const pages = ctx.pages.filter((p) => pageNumbers.includes(p.number)).sort((a, b) => a.number - b.number);
-  const stories = new Map<string, InDesignManifest["stories"][number]>();
+class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public details?: unknown,
+  ) {
+    super(message);
+  }
+}
 
-  const out: InDesignManifest["pages"] = pages.map((page) => {
-    const r = resolvePage(ctx, page);
-    let threadIndex = 0;
-    return {
-      number: page.number,
-      side: r.isLeft ? "left" : "right",
-      master: r.template?.furniture === "full" ? "A-Running head + folio" : r.template?.furniture === "folio" ? "B-Folio only" : "[None]",
-      frames: r.elements.map((el) => {
-        const bounds: [number, number, number, number] = [pt(el.y), pt(el.x), pt(el.y + el.h), pt(el.x + el.w)];
-        const style = el.frame.styleId ? paragraphStyles[el.frame.styleId] : undefined;
-        if (el.kind === "image") {
-          const asset = findImage(el.imageId, uploads);
-          return { id: `${page.id}:${el.id}`, type: "Graphic" as const, label: el.frame.label, boundsPt: bounds, link: asset ? linkName(asset) : undefined, fitting: el.imageFit === "cover" ? ("FILL_PROPORTIONALLY" as const) : ("PROPORTIONALLY" as const) };
-        }
-        if (el.kind === "text" && el.frame.bind === "body" && r.article) {
-          const storyId = `story-${r.article.id}`;
-          const story = stories.get(storyId) ?? { id: storyId, articleId: r.article.id, pages: storyPages(ctx.pages, r.article.id).map((p) => p.number), frames: [], taggedText: taggedStory(storyBody(ctx.pages, r.article)) };
-          story.frames.push(`${page.id}:${el.id}`);
-          stories.set(storyId, story);
-          return { id: `${page.id}:${el.id}`, type: "TextFrame" as const, label: el.frame.label, boundsPt: bounds, columns: el.columns, gutterPt: pt(el.gutter), story: storyId, threadIndex: threadIndex++, appliedParagraphStyle: style?.indesignName, localOverrides: page.frameOverrides[el.id]?.style };
-        }
-        if (el.kind === "text") {
-          return { id: `${page.id}:${el.id}`, type: "TextFrame" as const, label: el.frame.label, boundsPt: bounds, contents: el.text, appliedParagraphStyle: style?.indesignName, localOverrides: { ...el.frame.style, ...page.frameOverrides[el.id]?.style }, fill: el.fill };
-        }
-        return { id: `${page.id}:${el.id}`, type: "Rectangle" as const, label: `${el.frame.label} (${el.kind})`, boundsPt: bounds, fill: el.fill ?? el.background };
-      }),
-    };
+async function api<T>(path: string, key: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: { "Content-Type": "application/json", "x-pressflow-key": key, ...(init.headers ?? {}) },
+    cache: "no-store",
   });
+  const body = (await res.json().catch(() => ({}))) as { error?: string; details?: unknown };
+  if (!res.ok) throw new ApiError(body.error ?? `Request failed (HTTP ${res.status})`, res.status, body.details);
+  return body as T;
+}
 
+export async function testServer(key: string) {
+  return api<{ ok: boolean; checks: { name: string; ok: boolean; detail: string }[] }>("/api/indesign/test", key, { method: "POST", body: "{}" });
+}
+
+export function buildOptions(settings: Settings, outputs: BuildOptions["outputs"]): BuildOptions {
   return {
-    schema: "pressflow.indesign-manifest/1",
-    document: {
-      name: `${ctx.publication.masthead}-${ctx.publication.issueLabel.replace(/\s+/g, "")}`,
-      pageWidthPt: pt(ctx.publication.trim.width),
-      pageHeightPt: pt(ctx.publication.trim.height),
-      bleedPt: pt(ctx.publication.bleed),
-      exportWithBleed: opts.bleed,
-      facingPages: true,
-      marginsPt: { top: pt(s.marginTop), bottom: pt(s.marginBottom), inside: pt(s.marginInside), outside: pt(s.marginOutside) },
-      columns: s.columns,
-      gutterPt: pt(s.gutter),
-      startPageNumber: 1,
-    },
-    paragraphStyles: Object.values(paragraphStyles).map((p) => ({
-      name: p.indesignName,
-      fontFamily: fontDisplayNames[p.font],
-      fontStyle: `${p.weight >= 700 ? "Bold" : p.weight <= 300 ? "Light" : "Regular"}${p.italic ? " Italic" : ""}`,
-      pointSize: p.size,
-      leading: p.leading,
-      tracking: p.tracking ?? 0,
-      justification: { left: "LEFT_ALIGN", center: "CENTER_ALIGN", right: "RIGHT_ALIGN", justify: "LEFT_JUSTIFIED" }[p.align],
-      fillColor: p.color,
-      capitalization: p.uppercase ? "ALL_CAPS" : "NORMAL",
-    })),
-    pages: out,
-    stories: [...stories.values()],
+    pdfPreset: settings.integration.pdfPreset ?? PDF_PRESETS[0],
+    jpegResolution: settings.integration.jpegResolution ?? 72,
+    preflightProfile: settings.integration.preflightProfile?.trim() || "[Basic]",
+    outputs,
   };
 }
 
-/** Story text with InDesign Tagged Text–style paragraph markers. */
-function taggedStory(body: string) {
-  return parseBody(body)
-    .map((p) => {
-      const style = p.kind === "h" ? "Body/Subhead" : p.kind === "q" ? "Body/Question" : "Body/Justified";
-      return `<ps:${style}>${p.words.join(" ")}`;
-    })
-    .join("\n");
+export function makeManifest(ctx: LayoutContext, uploads: ImageAsset[], pages: number[], settings: Settings): InDesignManifestV2 {
+  return buildInDesignManifestV2(ctx, uploads, pages, { fontMap: settings.integration.fontFamilies });
 }
+
+/** Upload images that exist only in this browser so InDesign can place them. */
+async function stageUploads(manifest: InDesignManifestV2, uploads: ImageAsset[], key: string, onStage: (s: string) => void) {
+  const files = manifest.links.filter((l) => l.source === "upload").map((l) => l.path.replace(/^links\//, ""));
+  if (!files.length) return;
+  const { missing } = await api<{ missing: string[] }>("/api/indesign/assets", key, { method: "POST", body: JSON.stringify({ action: "check", files }) });
+  for (let i = 0; i < missing.length; i++) {
+    const file = missing[i];
+    const link = manifest.links.find((l) => l.path === `links/${file}`)!;
+    const asset = findImage(link.assetId, uploads);
+    if (!asset?.src) throw new Error(`Image ${file} is no longer in this browser.`);
+    onStage(`Uploading image ${i + 1} of ${missing.length}…`);
+    const [, data] = asset.src.split(",", 2);
+    await api("/api/indesign/assets", key, { method: "POST", body: JSON.stringify({ action: "upload", file, contentType: link.contentType, data }) });
+  }
+}
+
+export interface StartResult {
+  jobId: string;
+  pages: number;
+  links: number;
+  fonts: number;
+  manifest: InDesignManifestV2;
+}
+
+export async function startInDesignJob(
+  ctx: LayoutContext,
+  uploads: ImageAsset[],
+  pages: number[],
+  settings: Settings,
+  outputs: BuildOptions["outputs"],
+  onStage: (s: string) => void,
+): Promise<StartResult> {
+  const key = settings.integration.accessKey ?? "";
+  onStage("Building the InDesign manifest…");
+  const manifest = makeManifest(ctx, uploads, pages, settings);
+  await stageUploads(manifest, uploads, key, onStage);
+  onStage("Sending the job to Adobe InDesign…");
+  const res = await api<{ jobId: string; pages: number; links: number; fonts: number }>("/api/indesign/jobs", key, {
+    method: "POST",
+    body: JSON.stringify({ manifest, options: buildOptions(settings, outputs) }),
+  });
+  return { ...res, manifest };
+}
+
+export async function getInDesignJob(jobId: string, settings: Settings): Promise<JobView> {
+  return api<JobView>(`/api/indesign/jobs/${encodeURIComponent(jobId)}`, settings.integration.accessKey ?? "");
+}
+
+export const STAGE_LABEL: Record<JobView["status"], string> = {
+  queued: "Queued at Adobe",
+  running: "InDesign is building, preflighting and exporting the pages…",
+  succeeded: "Finished",
+  partial_success: "Finished with some errors",
+  failed: "Failed",
+};

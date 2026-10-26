@@ -5,7 +5,7 @@ import { fontDisplayNames } from "./fonts";
 import { findImage, linkName } from "./images";
 import { renderSampleSvg } from "./artwork";
 import { resolvePage, storyPages, storyBody, type LayoutContext, type ResolvedPage } from "./layout-engine";
-import { buildInDesignManifest } from "@/services/indesign";
+import { buildInDesignManifestV2 } from "./indesign/build-manifest";
 import type { ExportSettings, ImageAsset, QAIssue } from "./types";
 
 /* ------------------------------------------------------------ page range */
@@ -127,19 +127,20 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
   return new TextEncoder().encode(decodeURIComponent(b64));
 }
 
-export async function buildHandoffZip(ctx: LayoutContext, uploads: ImageAsset[], pageNumbers: number[], qa: QAIssue[], settings: ExportSettings) {
+export async function buildHandoffZip(ctx: LayoutContext, uploads: ImageAsset[], pageNumbers: number[], qa: QAIssue[]) {
   const JSZip = (await import("jszip")).default;
   const zip = new JSZip();
   const pkg = buildContentPackage(ctx, uploads, pageNumbers, qa, true);
-  const manifest = buildInDesignManifest(ctx, uploads, pageNumbers, { bleed: settings.bleed });
+  const manifest = buildInDesignManifestV2(ctx, uploads, pageNumbers, { fontMap: ctx.settings.integration.fontFamilies });
   zip.file("manifest.json", JSON.stringify(manifest, null, 2));
   zip.file("content-package.json", JSON.stringify(pkg, null, 2));
-  for (const story of manifest.stories) zip.file(`stories/${story.id}.txt`, story.taggedText);
-  for (const img of pkg.images) {
-    if ("missing" in img) continue;
-    const asset = findImage(img.id, uploads)!;
-    if (asset.source === "sample") zip.file(img.link, renderSampleSvg(asset.id));
-    else if (asset.src) zip.file(img.link, dataUrlToBytes(asset.src));
+  for (const story of manifest.stories) zip.file(`stories/${story.id}.txt`, story.paragraphs.map((p) => `<ps:${p.style}>${p.text}`).join(String.fromCharCode(10)));
+  // Every image the build manifest links to (including contents-page portraits).
+  for (const link of manifest.links) {
+    const asset = findImage(link.assetId, uploads);
+    if (!asset) continue;
+    if (asset.source === "sample") zip.file(link.path, renderSampleSvg(asset.id));
+    else if (asset.src) zip.file(link.path, dataUrlToBytes(asset.src));
   }
   zip.file(
     "README.md",
@@ -153,7 +154,7 @@ export async function buildHandoffZip(ctx: LayoutContext, uploads: ImageAsset[],
       "native documents with real paragraph styles, threaded text frames and linked images.",
       "",
       "## Contents",
-      "- `manifest.json` — document setup (trim, bleed, margins, columns), paragraph-style mapping, and every page's frames in points with threading order.",
+      "- `manifest.json` — the exact build file the PressFlow InDesign script uses: document setup in points, named paragraph styles with font family/style, every page item (frames, images, shapes) and story threading order.",
       "- `stories/*.txt` — story text tagged with paragraph style names (`<ps:Body/Justified>`).",
       "- `links/` — image assets referenced by image frames (sample artwork is SVG).",
       "- `content-package.json` — the full browser page model, articles and QA findings.",

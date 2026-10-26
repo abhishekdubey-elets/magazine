@@ -1,3 +1,5 @@
+import type { BuildReport, JobOutput } from "./indesign/manifest-types";
+
 /**
  * Central data model for Elets PressFlow AI.
  *
@@ -461,13 +463,23 @@ export interface ExportJob {
   format: ExportFormat;
   fileName: string;
   pages: number[];
-  status: "completed" | "failed" | "blocked";
+  status: "completed" | "failed" | "blocked" | "running";
   sizeBytes?: number;
   createdAt: string;
   durationMs?: number;
   qa: { errors: number; warnings: number };
   message?: string;
   settings: ExportSettings;
+  /** Adobe InDesign API job (print PDF / native documents). */
+  indesign?: {
+    jobId: string;
+    stage?: string;
+    outputs: JobOutput[];
+    report?: BuildReport;
+    /** Download links expire about 24 hours after the job finishes. */
+    expiresAt?: string;
+    errors?: string[];
+  };
 }
 
 /* --------------------------------------------------------------- Activity */
@@ -524,8 +536,15 @@ export interface Settings {
     cropMarks: boolean;
   };
   integration: {
-    mode: "browser-demo" | "indesign-server" | "uxp-plugin";
+    mode: "browser-demo" | "adobe-indesign-api" | "indesign-server" | "uxp-plugin";
     endpoint: string;
+    /** Shared key for this deployment's InDesign API routes (PRESSFLOW_API_KEY). Stored in this browser only. */
+    accessKey?: string;
+    pdfPreset?: string;
+    jpegResolution?: number;
+    preflightProfile?: string;
+    /** InDesign font family per role (house fonts); falls back to the web-font families. */
+    fontFamilies?: Partial<Record<FontRole, string>>;
   };
 }
 

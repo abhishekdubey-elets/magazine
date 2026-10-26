@@ -62,8 +62,8 @@ pdf.js — the file is never uploaded.
 | Create Like This — page classification and style inference | Rule-based heuristics on measured data (labelled) |
 | "AI" — classification, summary, pull quotes, headlines, image opportunities, layout recommendation, trim proposals | Simulated with deterministic local heuristics (labelled in the UI) |
 | Layout generation progress | Simulated service latency around the real engine |
-| Print-ready PDF/X and native `.indd` | Not available — require a connected InDesign service (shown as disabled) |
-| InDesign integration | Service boundary + manifest only (`src/services/indesign.ts`); no connection is faked |
+| Print-ready PDF/X, `.indd`, `.idml`, Adobe preflight | Real, via the Adobe InDesign API once configured (see below) |
+| InDesign integration | Server pipeline in `src/server/indesign`; nothing is faked when it is not configured |
 
 ## Project structure
 
@@ -95,7 +95,49 @@ src/
 Article bodies are plain text with a blank line between paragraphs. Interviews use `Q:` / `A:` prefixes;
 `## ` starts a sub-heading.
 
-## Connecting Adobe InDesign (recommended next step)
+## Print production with the Adobe InDesign API
+
+Print-ready output is built by **Adobe InDesign in the cloud** (Firefly Services InDesign API), fully
+automatically: Export Center → *Print-ready PDF via InDesign* or *InDesign documents*.
+
+**Pipeline**
+
+1. The browser converts the issue into a build manifest (`src/lib/indesign/build-manifest.ts`):
+   document setup in points, named paragraph styles with font family/style, every page item
+   (frames, images, shapes, gradients, furniture) and story threading order.
+2. `POST /api/indesign/jobs` stages the manifest, images and the house fonts in S3 and starts the
+   PressFlow custom script (`src/server/indesign/script/build.jsx`), registering it with Adobe on first
+   use.
+3. Inside InDesign the script builds the document, creates real paragraph styles, threads stories,
+   places and crops images, shrinks display lines to fit with InDesign's own composer, runs an Adobe
+   preflight profile and exports PDF/X (bleed + crop marks), INDD, IDML and JPEG page previews.
+4. The app polls `GET /api/indesign/jobs/:id`; when done, Export Center shows the downloads (Adobe
+   temporary storage, ~24 h), InDesign-rendered page previews and the build report (overset text,
+   missing fonts, image problems, preflight results).
+
+**Setup**
+
+1. Adobe Developer Console: project with **InDesign API** and an OAuth Server-to-Server credential.
+2. AWS S3 bucket plus an IAM user with read/write access to it. Upload your licensed OTF/TTF fonts to
+   `<S3_PREFIX>/fonts/`.
+3. Set the variables from `.env.example` (Vercel → Settings → Environment Variables, or `.env.local`)
+   and redeploy.
+4. In the app: Settings → InDesign integration → choose *Adobe InDesign API*, enter the access key
+   (`PRESSFLOW_API_KEY`), map font families to your house fonts, click **Test connection**.
+
+**Testing the script without Adobe**: export an *InDesign build package* from the Export Center,
+unzip it, then run
+
+```bash
+node scripts/indesign-mock.mjs manifest.json links out
+```
+
+This runs `build.jsx` against a simulated InDesign object model (checks the script, its outputs and
+report, and draws a schematic of every page item). Typesetting and overflow are only estimated there.
+After changing `build.jsx`, bump `SCRIPT_VERSION` in `src/server/indesign/pipeline.ts` so Adobe
+registers the new version.
+
+## Further InDesign options
 
 1. Stand up **InDesign Server** (or a UXP plugin bridge for desktop InDesign) behind a small HTTP service
    implementing `InDesignService` in `src/services/indesign.ts` (`buildDocument`, `preflight`, `exportDocument`).

@@ -56,6 +56,7 @@ interface Actions {
   addUpload: (img: ImageAsset) => void;
   log: (e: Omit<ActivityEvent, "id" | "at" | "actor"> & { actor?: string }) => void;
   addExportJob: (job: ExportJob) => void;
+  updateExportJob: (id: string, patch: Partial<ExportJob>) => void;
   recordQaRun: (run: QARun) => void;
   updateTemplate: (id: string, patch: Partial<Template>) => void;
   duplicateTemplate: (id: string) => string | undefined;
@@ -298,6 +299,7 @@ export const useStore = create<Store>()(
           })),
 
         addExportJob: (job) => set((s) => ({ exportJobs: [job, ...s.exportJobs].slice(0, 40) })),
+        updateExportJob: (id, patch) => set((s) => ({ exportJobs: s.exportJobs.map((j) => (j.id === id ? { ...j, ...patch } : j)) })),
         recordQaRun: (run) => set((s) => ({ qaRuns: [run, ...s.qaRuns].slice(0, 20) })),
 
         updateTemplate: (id, patch) =>

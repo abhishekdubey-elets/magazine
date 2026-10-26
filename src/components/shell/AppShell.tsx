@@ -23,6 +23,7 @@ import { useFontWatcher, useHydrated, usePublication, useQa } from "@/lib/hooks"
 import { NAV, navFor } from "@/lib/nav";
 import { useStore } from "@/lib/store";
 import { Badge, Button, cn, Modal, TipProvider } from "../ui";
+import { useInDesignPolling } from "../export/InDesignPanel";
 import { FixHost } from "../qa/FixHost";
 import { toast, Toaster } from "./toast";
 
@@ -33,6 +34,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const hydrated = useHydrated();
   const pathname = usePathname();
   useFontWatcher();
+  useInDesignPolling();
 
   useEffect(() => {
     useVisited.setState((s) => (s.visited.includes(pathname) ? s : { visited: [...s.visited, pathname] }));
