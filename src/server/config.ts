@@ -19,9 +19,10 @@ export const env = {
   },
   s3: {
     bucket: process.env.S3_BUCKET ?? "",
-    region: process.env.S3_REGION ?? process.env.AWS_REGION ?? "",
-    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID ?? "",
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY ?? "",
+    // Only explicit S3_* settings: Vercel sets AWS_REGION to the function region, not the bucket's.
+    region: process.env.S3_REGION ?? "",
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "",
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "",
     prefix: (process.env.S3_PREFIX ?? "pressflow").replace(/^\/|\/$/g, ""),
   },
   /** Shared key the app must send (x-pressflow-key) to run paid InDesign jobs. */
