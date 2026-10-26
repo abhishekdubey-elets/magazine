@@ -1,0 +1,450 @@
+import type { FrameSpec, Template } from "./types";
+import { ink } from "./design-tokens";
+
+/**
+ * Built-in template library. Geometry is in mm on a 205 x 278 mm trim
+ * (Tech Maha Impact format) with 15 mm side margins, live area y 22–258 mm.
+ * Frames bound to "body" are threaded in array order; text that does not fit
+ * flows to the next body frame, then to the next page of the same article.
+ */
+
+const UPDATED = "2026-05-12T09:00:00.000Z";
+const WHITE = "#ffffff";
+
+type F = Omit<FrameSpec, "kind" | "role" | "label"> & Partial<Pick<FrameSpec, "label">>;
+
+const text = (role: FrameSpec["role"], label: string, f: F): FrameSpec => ({ kind: "text", role, label, ...f });
+const image = (label: string, f: F): FrameSpec => ({ kind: "image", role: "image", label, imageFit: "cover", ...f });
+const shape = (label: string, f: F): FrameSpec => ({ kind: "shape", role: "decor", label, optional: true, ...f });
+const body = (label: string, f: F): FrameSpec => text("body", label, { bind: "body", styleId: "body", ...f });
+const rule = (id: string, x: number, y: number, w: number): FrameSpec =>
+  shape("Rule", { id, x, y, w, h: 0.35, fill: ink.rule });
+
+const darkFade = (from: number, to: number) =>
+  `linear-gradient(180deg, rgba(12,20,42,${from}) 0%, rgba(12,20,42,${to}) 100%)`;
+
+export const builtInTemplates: Template[] = [
+  /* ------------------------------------------------------------ Cover */
+  {
+    id: "tpl-cover",
+    name: "Cover — Conclave Compendium",
+    pageType: "cover",
+    contentTypes: [],
+    description: "Front cover with partner strip, masthead, display cover line and illustrated hero.",
+    columns: 1,
+    imagePattern: "Full-bleed hero, lower two-thirds",
+    hierarchy: "Masthead › Display cover line › Cover lines",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "none",
+    wordRange: [0, 0],
+    frames: [
+      image("Cover art", { id: "cover-art", x: -5, y: 122, w: 215, h: 161, bind: "image.0", defaultImageId: "img-cover-art", bleeds: true, focusY: 100 }),
+      { id: "partners", kind: "masthead", role: "masthead", label: "Partner strip", x: 15, y: 9, w: 175, h: 16, variant: "partners", bleeds: true },
+      { id: "masthead", kind: "masthead", role: "masthead", label: "Masthead", x: 15, y: 31, w: 175, h: 24, variant: "logo" },
+      text("deck", "Tagline", { id: "tagline", x: 15, y: 57, w: 175, h: 7, bind: "static", text: "Maharashtra's Premier CSR & Technology Conclave", styleId: "deck", style: { align: "center", size: 12, weight: 400, color: ink.navy } }),
+      text("kicker", "Issue line", { id: "issue", x: 15, y: 66, w: 175, h: 5, bind: "static", text: "May 2026 · Special Compendium", styleId: "kicker", style: { align: "center", color: ink.orange } }),
+      text("headline", "Cover line", { id: "headline", x: 10, y: 79, w: 185, h: 25, bind: "title", text: "Reimagining Governance", styleId: "display", style: { size: 62, leading: 58, align: "center", color: ink.navy } }),
+      text("deck", "Cover sub-line", { id: "subline", x: 15, y: 105, w: 175, h: 9, bind: "subtitle", text: "Through Technology, CSR & Measurable Impact", styleId: "deck", style: { align: "center", size: 15, weight: 400, color: ink.navy } }),
+      text("kicker", "Cover line 1", { id: "line-1", x: 15, y: 234, w: 55, h: 24, bind: "static", text: "Cover story · p.7\nInside India's AI-powered governance state", styleId: "kicker", style: { color: ink.navy, uppercase: false, tracking: 0, size: 8.5, leading: 11 }, fill: "rgba(255,255,255,0.93)", inset: 3, radius: 1.5 }),
+      text("kicker", "Cover line 2", { id: "line-2", x: 75, y: 234, w: 55, h: 24, bind: "static", text: "Interview · p.6\nBuilding digital trust at scale", styleId: "kicker", style: { color: ink.navy, uppercase: false, tracking: 0, size: 8.5, leading: 11 }, fill: "rgba(255,255,255,0.93)", inset: 3, radius: 1.5 }),
+      text("kicker", "Cover line 3", { id: "line-3", x: 135, y: 234, w: 55, h: 24, bind: "static", text: "CSR 2.0 · p.14\nA roadmap for social transformation", styleId: "kicker", style: { color: ink.navy, uppercase: false, tracking: 0, size: 8.5, leading: 11 }, fill: "rgba(255,255,255,0.93)", inset: 3, radius: 1.5 }),
+      shape("Brand bar", { id: "bar", x: -5, y: 268, w: 215, h: 15, background: `linear-gradient(90deg, ${ink.blue}, ${ink.orange})`, bleeds: true }),
+    ],
+  },
+  /* --------------------------------------------------------- Contents */
+  {
+    id: "tpl-contents",
+    name: "Contents — Feature & Portraits",
+    pageType: "contents",
+    contentTypes: [],
+    description: "Contents with cover-story feature panel, leadership portrait row and an auto-generated ‘In Focus’ list.",
+    columns: 4,
+    imagePattern: "Feature image top, 4-up portrait row",
+    hierarchy: "CONTENTS › Feature › Leadership › In Focus",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "full",
+    wordRange: [0, 0],
+    frames: [
+      text("headline", "Contents title", { id: "title", x: 15, y: 20, w: 120, h: 20, bind: "static", text: "Contents", styleId: "display", style: { size: 58, leading: 54, color: ink.navy, uppercase: true } }),
+      { id: "badge", kind: "masthead", role: "masthead", label: "eGov badge", x: 150, y: 22, w: 40, h: 13, variant: "badge" },
+      image("Feature image", { id: "feature-img", x: 15, y: 44, w: 175, h: 80, bind: "image.0", defaultImageId: "img-network" }),
+      { id: "toc-feature", kind: "toc", role: "toc", label: "Feature panel", x: 15, y: 105, w: 104, h: 19, variant: "feature" },
+      text("kicker", "Leadership heading", { id: "h-lead", x: 15, y: 130, w: 175, h: 5, bind: "static", text: "Leadership Insights", styleId: "kicker", style: { align: "center", color: ink.navy, size: 9 } }),
+      { id: "toc-people", kind: "toc", role: "toc", label: "Portrait row", x: 15, y: 138, w: 175, h: 58, variant: "people" },
+      text("kicker", "In Focus heading", { id: "h-focus", x: 15, y: 201, w: 175, h: 5, bind: "static", text: "In Focus", styleId: "kicker", style: { align: "center", color: ink.navy, size: 9 } }),
+      { id: "toc-list", kind: "toc", role: "toc", label: "Contents list", x: 15, y: 208, w: 175, h: 50, variant: "list" },
+    ],
+  },
+  /* ---------------------------------------------------- Editor's note */
+  {
+    id: "tpl-editors-note",
+    name: "Editor's Note",
+    pageType: "editors-note",
+    contentTypes: ["editorial"],
+    description: "Signed editor's letter: portrait column with pull quote, two-column letter and signature.",
+    columns: 2,
+    imagePattern: "Portrait in left rail",
+    hierarchy: "Kicker › Headline › Deck › Letter › Signature",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "full",
+    wordRange: [180, 340],
+    frames: [
+      text("kicker", "Kicker", { id: "kicker", x: 15, y: 22, w: 175, h: 5, bind: "static", text: "From the Editor's Desk", styleId: "kicker" }),
+      text("headline", "Headline", { id: "headline", x: 15, y: 28, w: 175, h: 24, bind: "title", styleId: "headline-l", style: { color: ink.navy } }),
+      text("deck", "Deck", { id: "deck", x: 15, y: 53, w: 175, h: 12, bind: "subtitle", styleId: "deck", optional: true }),
+      rule("rule", 15, 68, 175),
+      image("Portrait", { id: "portrait", x: 15, y: 73, w: 50, h: 62, bind: "image.0", focusY: 20 }),
+      text("author", "Name", { id: "name", x: 15, y: 138, w: 50, h: 7, bind: "author.name", styleId: "name", style: { size: 12, leading: 14 } }),
+      text("designation", "Designation", { id: "designation", x: 15, y: 145, w: 50, h: 10, bind: "author.role", styleId: "designation" }),
+      text("pullquote", "Pull quote", { id: "quote", x: 15, y: 162, w: 50, h: 70, bind: "pullquote.0", styleId: "pullquote", style: { font: "serif", weight: 400, italic: true, size: 13.5, leading: 18 }, optional: true }),
+      body("Letter", { id: "body", x: 72, y: 73, w: 118, h: 172, columns: 2 }),
+      text("signature", "Signature", { id: "signature", x: 72, y: 248, w: 118, h: 9, bind: "author.name", styleId: "pullquote", style: { font: "serif", italic: true, weight: 400, size: 15, leading: 18, color: ink.navy, align: "right" } }),
+    ],
+  },
+  /* ------------------------------------------------ Leadership message */
+  {
+    id: "tpl-message",
+    name: "Leadership Message",
+    pageType: "leadership-message",
+    contentTypes: ["leadership-message"],
+    description: "Cream message page: single generous measure, framed portrait with name badge and serif quote.",
+    columns: 1,
+    imagePattern: "Framed portrait, top right",
+    hierarchy: "‘Message’ › Letter › Name badge",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    background: ink.cream,
+    furniture: "full",
+    wordRange: [180, 420],
+    frames: [
+      text("headline", "Title", { id: "title", x: 15, y: 25, w: 105, h: 14, bind: "title", styleId: "message-title" }),
+      text("deck", "Subtitle", { id: "deck", x: 15, y: 40, w: 105, h: 9, bind: "subtitle", styleId: "deck", style: { size: 11.5, leading: 14 }, optional: true }),
+      shape("Accent rule", { id: "accent", x: 15, y: 51, w: 18, h: 0.9, fill: ink.orange }),
+      body("Message", { id: "body", x: 15, y: 56, w: 105, h: 202, styleId: "body-light" }),
+      image("Portrait", { id: "portrait", x: 128, y: 25, w: 62, h: 78, bind: "image.0", focusY: 18 }),
+      shape("Name badge", { id: "badge", x: 128, y: 100, w: 62, h: 24, fill: ink.orange, radius: 2, optional: false }),
+      text("author", "Name", { id: "name", x: 130, y: 102.5, w: 58, h: 8, bind: "author.name", styleId: "name", style: { color: WHITE, align: "center", size: 12.5, leading: 14 } }),
+      text("designation", "Designation", { id: "designation", x: 130, y: 110, w: 58, h: 13, bind: "author.role", styleId: "designation", style: { color: WHITE, align: "center", size: 7.2, leading: 9 } }),
+      text("pullquote", "Quote", { id: "quote", x: 128, y: 134, w: 62, h: 62, bind: "pullquote.0", styleId: "pullquote", style: { font: "serif", italic: true, weight: 400, size: 13, leading: 18, color: ink.navy }, optional: true }),
+      shape("Signature rule", { id: "sig-rule", x: 128, y: 236, w: 30, h: 0.35, fill: ink.orange }),
+      text("signature", "Signature", { id: "signature", x: 128, y: 239, w: 62, h: 9, bind: "author.name", styleId: "pullquote", style: { font: "serif", italic: true, weight: 400, size: 14, leading: 17, color: ink.navy } }),
+    ],
+  },
+  /* ------------------------------------------------ Interview: classic */
+  {
+    id: "tpl-interview-classic",
+    name: "Interview — Classic Q&A",
+    pageType: "interview",
+    contentTypes: ["interview"],
+    description: "Headline and bold standfirst beside a portrait with name band; three-column Q&A below.",
+    columns: 3,
+    imagePattern: "Portrait top right with name band",
+    hierarchy: "Kicker › Headline › Deck › Standfirst › Q&A",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "full",
+    wordRange: [380, 560],
+    frames: [
+      text("kicker", "Kicker", { id: "kicker", x: 15, y: 22, w: 110, h: 5, bind: "static", text: "Interview", styleId: "kicker" }),
+      text("headline", "Headline", { id: "headline", x: 15, y: 28, w: 112, h: 23, bind: "title", styleId: "headline-l", style: { size: 28, leading: 29 } }),
+      text("deck", "Deck", { id: "deck", x: 15, y: 53, w: 112, h: 11, bind: "subtitle", styleId: "deck", style: { size: 12, leading: 15 } }),
+      text("intro", "Standfirst", { id: "intro", x: 15, y: 65, w: 112, h: 35, bind: "summary", styleId: "intro-bold" }),
+      text("byline", "Byline", { id: "byline", x: 15, y: 101, w: 112, h: 4.5, bind: "byline", styleId: "byline", optional: true }),
+      image("Portrait", { id: "portrait", x: 132, y: 22, w: 58, h: 70, bind: "image.0", focusY: 20 }),
+      shape("Name band", { id: "band", x: 132, y: 80, w: 58, h: 23, fill: ink.navy }),
+      text("author", "Name", { id: "name", x: 135, y: 82.5, w: 52, h: 7, bind: "author.name", styleId: "name", style: { color: WHITE, size: 11.5, leading: 13, align: "center" } }),
+      text("designation", "Designation", { id: "designation", x: 135, y: 89.5, w: 52, h: 13, bind: "author.role", styleId: "designation", style: { color: "#d7deec", size: 7, leading: 8.8, align: "center" } }),
+      rule("rule", 15, 106, 175),
+      body("Q&A", { id: "body", x: 15, y: 110, w: 175, h: 148, columns: 3 }),
+    ],
+  },
+  /* --------------------------------------------------- Interview: hero */
+  {
+    id: "tpl-interview-hero",
+    name: "Interview — Hero Portrait",
+    pageType: "interview",
+    contentTypes: ["interview"],
+    description: "Full-bleed portrait opener with headline on image; standfirst and name beneath; compact Q&A.",
+    columns: 3,
+    imagePattern: "Full-bleed portrait, top half",
+    hierarchy: "Headline on image › Name › Standfirst › Q&A",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "folio",
+    wordRange: [200, 360],
+    frames: [
+      image("Hero portrait", { id: "portrait", x: -5, y: -5, w: 215, h: 133, bind: "image.0", bleeds: true, focusY: 16 }),
+      shape("Image fade", { id: "fade", x: -5, y: 58, w: 215, h: 70, background: darkFade(0, 0.88), bleeds: true }),
+      text("kicker", "Kicker", { id: "kicker", x: 15, y: 86, w: 120, h: 5, bind: "static", text: "In Conversation", styleId: "kicker", style: { color: ink.orange } }),
+      text("headline", "Headline", { id: "headline", x: 15, y: 92, w: 160, h: 23, bind: "title", styleId: "headline-l", style: { color: WHITE, size: 28, leading: 29 } }),
+      text("deck", "Deck", { id: "deck", x: 15, y: 116, w: 175, h: 9, bind: "subtitle", styleId: "deck", style: { color: "#e2e7f2", size: 11.5, leading: 14 }, optional: true }),
+      text("author", "Name", { id: "name", x: 15, y: 134, w: 78, h: 8, bind: "author.name", styleId: "name", style: { size: 14, leading: 16, color: ink.blue } }),
+      text("designation", "Designation", { id: "designation", x: 15, y: 142, w: 78, h: 14, bind: "author.role", styleId: "designation" }),
+      text("intro", "Standfirst", { id: "intro", x: 100, y: 134, w: 90, h: 28, bind: "summary", styleId: "intro-bold", style: { size: 9, leading: 12.2 } }),
+      rule("rule", 15, 165, 175),
+      body("Q&A", { id: "body", x: 15, y: 169, w: 175, h: 89, columns: 3 }),
+    ],
+  },
+  /* ------------------------------------------------- Standard article */
+  {
+    id: "tpl-article-standard",
+    name: "Standard Article",
+    pageType: "article",
+    contentTypes: ["feature", "news-report", "editorial"],
+    description: "Classic news-magazine page: headline across, lead image with caption, pull quote rail and threaded columns.",
+    columns: 3,
+    imagePattern: "Lead image across two columns",
+    hierarchy: "Section › Headline › Deck › Byline › Body",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "full",
+    wordRange: [300, 460],
+    frames: [
+      text("kicker", "Section kicker", { id: "kicker", x: 15, y: 22, w: 120, h: 5, bind: "section", styleId: "kicker" }),
+      text("headline", "Headline", { id: "headline", x: 15, y: 28, w: 175, h: 26, bind: "title", styleId: "headline-xl", style: { size: 34, leading: 35 } }),
+      text("deck", "Deck", { id: "deck", x: 15, y: 55, w: 175, h: 11, bind: "subtitle", styleId: "deck" }),
+      text("byline", "Byline", { id: "byline", x: 15, y: 67.5, w: 175, h: 5, bind: "byline", styleId: "byline" }),
+      image("Lead image", { id: "image", x: 15, y: 76, w: 115, h: 70, bind: "image.0" }),
+      text("caption", "Caption", { id: "caption", x: 15, y: 147.5, w: 115, h: 8, bind: "caption.0", styleId: "caption" }),
+      text("pullquote", "Pull quote", { id: "quote", x: 135, y: 76, w: 55, h: 42, bind: "pullquote.0", styleId: "pullquote", style: { size: 13, leading: 16 }, optional: true }),
+      body("Body — columns 1–2", { id: "body", x: 15, y: 158, w: 115, h: 100, columns: 2 }),
+      body("Body — column 3", { id: "body-2", x: 135, y: 121, w: 55, h: 137 }),
+    ],
+  },
+  /* -------------------------------------------------- Feature: hero */
+  {
+    id: "tpl-feature-hero",
+    name: "Feature — Display Hero",
+    pageType: "feature",
+    contentTypes: ["feature", "case-study"],
+    description: "Full-bleed image band, oversized display headline and light caps deck; body threads to a continuation page.",
+    columns: 3,
+    imagePattern: "Full-bleed band, top 40%",
+    hierarchy: "Display headline › Caps deck › Pull quote › Body",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "folio",
+    wordRange: [180, 300],
+    frames: [
+      image("Hero image", { id: "image", x: -5, y: -5, w: 215, h: 117, bind: "image.0", bleeds: true, focusY: 45 }),
+      text("caption", "Caption", { id: "caption", x: 15, y: 113.5, w: 175, h: 5, bind: "caption.0", styleId: "caption", style: { align: "right" } }),
+      text("headline", "Display headline", { id: "headline", x: 15, y: 121, w: 175, h: 28, bind: "title", styleId: "display", style: { size: 76, leading: 68 } }),
+      text("deck", "Caps deck", { id: "deck", x: 15, y: 150, w: 175, h: 14, bind: "subtitle", styleId: "deck", style: { uppercase: true, size: 14, leading: 16.5 } }),
+      text("byline", "Byline", { id: "byline", x: 15, y: 166, w: 175, h: 5, bind: "byline", styleId: "byline" }),
+      rule("rule", 15, 173, 175),
+      body("Body — columns 1–2", { id: "body", x: 15, y: 178, w: 115, h: 80, columns: 2 }),
+      text("pullquote", "Pull quote", { id: "quote", x: 135, y: 178, w: 55, h: 44, bind: "pullquote.0", styleId: "pullquote", style: { size: 13.5, leading: 16.5 }, optional: true }),
+      body("Body — column 3", { id: "body-2", x: 135, y: 225, w: 55, h: 33 }),
+    ],
+  },
+  /* ------------------------------------------------ Feature: opener */
+  {
+    id: "tpl-feature-opener",
+    name: "Full-Page Feature Opener",
+    pageType: "feature",
+    contentTypes: ["feature"],
+    description: "Full-bleed image page with headline, deck and standfirst on a dark fade. Body starts on the next page.",
+    columns: 1,
+    imagePattern: "Full-bleed, whole page",
+    hierarchy: "Section › Display headline › Deck › Standfirst",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "none",
+    wordRange: [0, 0],
+    frames: [
+      image("Full-bleed image", { id: "image", x: -5, y: -5, w: 215, h: 288, bind: "image.0", bleeds: true, focusY: 35 }),
+      shape("Dark fade", { id: "fade", x: -5, y: 100, w: 215, h: 183, background: darkFade(0, 0.94), bleeds: true }),
+      shape("Section tab", { id: "tab", x: -5, y: 137.5, w: 14, h: 6, fill: ink.orange, bleeds: true }),
+      text("kicker", "Section", { id: "kicker", x: 15, y: 138, w: 120, h: 6, bind: "section", styleId: "kicker", style: { color: ink.orange, size: 9 } }),
+      text("headline", "Headline", { id: "headline", x: 15, y: 146, w: 175, h: 58, bind: "title", styleId: "display", style: { color: WHITE, size: 56, leading: 50 } }),
+      text("deck", "Deck", { id: "deck", x: 15, y: 206, w: 175, h: 16, bind: "subtitle", styleId: "deck", style: { color: "#e2e7f2", uppercase: true, size: 13, leading: 16 } }),
+      text("intro", "Standfirst", { id: "intro", x: 15, y: 225, w: 118, h: 33, bind: "summary", styleId: "intro", style: { color: "#f1f3f8", size: 10, leading: 13.5 } }),
+      text("byline", "Byline", { id: "byline", x: 140, y: 250, w: 50, h: 8, bind: "byline", styleId: "byline", style: { color: "#c5cde0", align: "right", size: 6.8, leading: 9 } }),
+    ],
+  },
+  /* ----------------------------------------------------- Continuation */
+  {
+    id: "tpl-continuation",
+    name: "Continuation — 3 Column",
+    pageType: "article",
+    contentTypes: ["feature", "interview", "case-study", "news-report", "event-report", "editorial"],
+    description: "Continues an article from the previous page: three threaded columns with a secondary image, facts box and pull quote.",
+    columns: 3,
+    imagePattern: "Secondary image in right column",
+    hierarchy: "Body › Sub-heads › Facts › Pull quote",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "full",
+    wordRange: [450, 700],
+    frames: [
+      body("Body — columns 1–2", { id: "body", x: 15, y: 23, w: 115, h: 235, columns: 2 }),
+      image("Secondary image", { id: "image", x: 135, y: 23, w: 55, h: 56, bind: "image.1", optional: true }),
+      text("caption", "Caption", { id: "caption", x: 135, y: 80.5, w: 55, h: 10, bind: "caption.1", styleId: "caption", optional: true }),
+      text("facts", "Key facts", { id: "facts", x: 135, y: 93, w: 55, h: 69, bind: "facts", styleId: "facts", fill: "accent-tint", inset: 3.5, optional: true }),
+      text("pullquote", "Pull quote", { id: "quote", x: 135, y: 165.5, w: 55, h: 32, bind: "pullquote.1", styleId: "pullquote", style: { size: 13, leading: 16 }, optional: true }),
+      body("Body — column 3", { id: "body-2", x: 135, y: 200, w: 55, h: 58 }),
+    ],
+  },
+  /* ------------------------------------------------------- Case study */
+  {
+    id: "tpl-case-study",
+    name: "Case Study — Facts Sidebar",
+    pageType: "article",
+    contentTypes: ["case-study", "news-report"],
+    description: "Tinted ‘At a glance’ sidebar with key metrics; image and two-column narrative of challenge, approach, outcomes.",
+    columns: 2,
+    imagePattern: "Image top right of narrative",
+    hierarchy: "Kicker › Headline › Deck › Facts › Narrative",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "full",
+    wordRange: [260, 420],
+    frames: [
+      text("kicker", "Kicker", { id: "kicker", x: 15, y: 22, w: 120, h: 5, bind: "static", text: "Case Study", styleId: "kicker" }),
+      text("headline", "Headline", { id: "headline", x: 15, y: 28, w: 175, h: 24, bind: "title", styleId: "headline-xl", style: { size: 34, leading: 35 } }),
+      text("deck", "Deck", { id: "deck", x: 15, y: 53, w: 175, h: 11, bind: "subtitle", styleId: "deck" }),
+      shape("Sidebar", { id: "sidebar", x: 15, y: 68, w: 52, h: 190, fill: "accent-tint" }),
+      text("kicker", "Sidebar heading", { id: "glance", x: 19, y: 73, w: 44, h: 5, bind: "static", text: "At a glance", styleId: "kicker" }),
+      text("facts", "Key facts", { id: "facts", x: 19, y: 80, w: 44, h: 120, bind: "facts", styleId: "facts" }),
+      text("pullquote", "Pull quote", { id: "quote", x: 19, y: 204, w: 44, h: 36, bind: "pullquote.0", styleId: "pullquote", style: { size: 11.5, leading: 14 }, optional: true }),
+      text("byline", "Byline", { id: "byline", x: 19, y: 243, w: 44, h: 12, bind: "byline", styleId: "byline", style: { size: 6.8, leading: 9 } }),
+      image("Image", { id: "image", x: 72, y: 68, w: 118, h: 52, bind: "image.0" }),
+      text("caption", "Caption", { id: "caption", x: 72, y: 121.5, w: 118, h: 7, bind: "caption.0", styleId: "caption" }),
+      body("Narrative", { id: "body", x: 72, y: 131, w: 118, h: 127, columns: 2 }),
+    ],
+  },
+  /* ----------------------------------------------------- Event report */
+  {
+    id: "tpl-event-report",
+    name: "Event Report — Photo Strip",
+    pageType: "article",
+    contentTypes: ["event-report", "news-report"],
+    description: "Two-photo strip under the headline, shared caption and three-column report.",
+    columns: 3,
+    imagePattern: "Two-up photo strip",
+    hierarchy: "Section › Headline › Deck › Photos › Report",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "full",
+    wordRange: [260, 420],
+    frames: [
+      text("kicker", "Section kicker", { id: "kicker", x: 15, y: 22, w: 120, h: 5, bind: "section", styleId: "kicker" }),
+      text("headline", "Headline", { id: "headline", x: 15, y: 28, w: 175, h: 16, bind: "title", styleId: "headline-xl", style: { size: 38, leading: 38 } }),
+      text("deck", "Deck", { id: "deck", x: 15, y: 45, w: 175, h: 10, bind: "subtitle", styleId: "deck" }),
+      image("Photo 1", { id: "image", x: 15, y: 58, w: 115, h: 62, bind: "image.0" }),
+      image("Photo 2", { id: "image-2", x: 135, y: 58, w: 55, h: 62, bind: "image.1", optional: true }),
+      text("caption", "Caption", { id: "caption", x: 15, y: 121.5, w: 175, h: 6, bind: "caption.0", styleId: "caption" }),
+      text("byline", "Byline", { id: "byline", x: 15, y: 130, w: 120, h: 5, bind: "byline", styleId: "byline" }),
+      text("pullquote", "Pull quote", { id: "quote", x: 15, y: 137, w: 175, h: 14, bind: "pullquote.0", styleId: "pullquote", style: { align: "center", size: 14, leading: 17 }, optional: true }),
+      body("Report", { id: "body", x: 15, y: 154, w: 175, h: 104, columns: 3 }),
+    ],
+  },
+  /* ------------------------------------------------------ Infographic */
+  {
+    id: "tpl-infographic",
+    name: "Infographic — Numbers Page",
+    pageType: "infographic",
+    contentTypes: ["feature"],
+    description: "Data page: display headline, short explainer, six-tile stat grid and a bar chart.",
+    columns: 3,
+    imagePattern: "No photography; data tiles + chart",
+    hierarchy: "Display headline › Explainer › Stats › Chart",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "full",
+    wordRange: [60, 160],
+    frames: [
+      text("kicker", "Section kicker", { id: "kicker", x: 15, y: 22, w: 120, h: 5, bind: "section", styleId: "kicker" }),
+      text("headline", "Headline", { id: "headline", x: 15, y: 28, w: 175, h: 30, bind: "title", styleId: "display", style: { size: 44, leading: 41, color: ink.navy } }),
+      text("deck", "Deck", { id: "deck", x: 15, y: 59, w: 175, h: 8, bind: "subtitle", styleId: "deck" }),
+      body("Explainer", { id: "body", x: 15, y: 70, w: 175, h: 30, columns: 2 }),
+      { id: "stats", kind: "stats", role: "stats", label: "Stat tiles", x: 15, y: 104, w: 175, h: 88, bind: "facts" },
+      { id: "chart", kind: "chart", role: "chart", label: "Bar chart", x: 15, y: 199, w: 112, h: 59, text: "e-Services delivered per month (lakh, sample)|2021:38,2022:52,2023:71,2024:88,2025:112,2026:131" },
+      shape("Note panel", { id: "note-bg", x: 135, y: 199, w: 55, h: 59, fill: "accent-tint" }),
+      text("kicker", "Note heading", { id: "note-h", x: 139, y: 203, w: 47, h: 5, bind: "static", text: "About these figures", styleId: "kicker" }),
+      text("caption", "Source note", { id: "note", x: 139, y: 210, w: 47, h: 44, bind: "static", text: "Figures on this page are illustrative sample data prepared for the PressFlow demo. Monthly volumes are rounded; cumulative values are labelled. Verify against departmental sources before print.", styleId: "caption", style: { size: 8.2, leading: 11.5, italic: false, color: "#3a4253" } }),
+    ],
+  },
+  /* --------------------------------------------------- Advertisement */
+  {
+    id: "tpl-advertisement",
+    name: "Advertisement — Full Page",
+    pageType: "advertisement",
+    contentTypes: [],
+    description: "Supplied full-page advertisement placed edge to edge with 5 mm bleed.",
+    columns: 1,
+    imagePattern: "Supplied artwork, full bleed",
+    hierarchy: "Advertiser artwork",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    furniture: "none",
+    wordRange: [0, 0],
+    frames: [image("Ad artwork", { id: "ad", x: -5, y: -5, w: 215, h: 288, bind: "image.0", bleeds: true, imageFit: "cover" })],
+  },
+  /* ------------------------------------------------------ Back cover */
+  {
+    id: "tpl-closing",
+    name: "Closing Page — Back Cover",
+    pageType: "closing",
+    contentTypes: ["editorial"],
+    description: "Back cover with skyline image, masthead, thank-you note, partner roll and website.",
+    columns: 1,
+    imagePattern: "Full-bleed image, top half",
+    hierarchy: "Masthead › Note › Partners › URL",
+    status: "active",
+    updatedAt: UPDATED,
+    builtIn: true,
+    background: ink.navy,
+    furniture: "none",
+    wordRange: [40, 140],
+    frames: [
+      image("Image", { id: "image", x: -5, y: -5, w: 215, h: 145, bind: "image.0", bleeds: true, focusY: 60 }),
+      shape("Fade", { id: "fade", x: -5, y: 85, w: 215, h: 56, background: `linear-gradient(180deg, rgba(29,43,79,0), ${ink.navy})`, bleeds: true }),
+      { id: "masthead", kind: "masthead", role: "masthead", label: "Masthead", x: 15, y: 140, w: 175, h: 20, variant: "light" },
+      text("headline", "Headline", { id: "headline", x: 15, y: 165, w: 175, h: 11, bind: "title", styleId: "headline-m", style: { color: WHITE, align: "center" } }),
+      body("Note", { id: "body", x: 30, y: 179, w: 145, h: 40, styleId: "body-light", style: { color: "#dfe5f1", align: "center" } }),
+      text("kicker", "Partners", { id: "partners", x: 15, y: 223, w: 175, h: 24, bind: "static", text: "Knowledge Partner · Banking Partners · Technology Partner · Cybersecurity Partner · CSR Partners · Supporting Partners", styleId: "kicker", style: { color: "#aeb9d3", align: "center", size: 7, leading: 13 } }),
+      text("headline", "Website", { id: "web", x: 15, y: 250, w: 175, h: 10, bind: "static", text: "www.eletsonline.com", styleId: "headline-m", style: { color: WHITE, align: "center", size: 18 } }),
+      shape("Brand bar", { id: "bar", x: -5, y: 266, w: 215, h: 17, background: `linear-gradient(90deg, ${ink.blue}, ${ink.orange})`, bleeds: true }),
+    ],
+  },
+];
+
+export const templateById = (templates: Template[], id?: string) => templates.find((t) => t.id === id);
+
+/** Templates a given article could use, best first. */
+export const HOUSE_TRIM = { width: 205, height: 278 };
+
+/** A template's geometry only makes sense on the page size it was designed for. */
+export function fitsTrim(t: Template, trim?: { width: number; height: number }) {
+  if (!trim) return true;
+  const tt = t.trim ?? HOUSE_TRIM;
+  return Math.abs(tt.width - trim.width) < 1 && Math.abs(tt.height - trim.height) < 1;
+}
+
+export function compatibleTemplates(templates: Template[], contentType: string, trim?: { width: number; height: number }) {
+  return templates.filter(
+    (t) =>
+      t.status !== "archived" &&
+      (t.contentTypes as string[]).includes(contentType) &&
+      !t.id.endsWith("continuation") &&
+      fitsTrim(t, trim),
+  );
+}
