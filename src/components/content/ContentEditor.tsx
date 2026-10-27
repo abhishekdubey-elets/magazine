@@ -10,6 +10,7 @@ import { useCan } from "@/lib/sync/engine";
 import { countWords } from "@/lib/text-engine";
 import type { ApprovalStatus, Article, ContentType } from "@/lib/types";
 import { ImagePicker, UploadButton, useAllImages } from "../common";
+import { AiAssist } from "./AiAssist";
 import { toast } from "../shell/toast";
 import { Button, Field, Input, Modal, Select, Textarea } from "../ui";
 
@@ -145,9 +146,17 @@ export function ContentEditor({ open, onOpenChange, article, onSaved }: { open: 
         <Field label="Article text *" htmlFor="ce-body" className="col-span-6">
           <Textarea id="ce-body" rows={10} value={a.body} onChange={(e) => set({ body: e.target.value })} placeholder="Paste the approved article text here…" className="text-[13px]" />
         </Field>
-        <Field label="Summary / standfirst" htmlFor="ce-sum" className="col-span-6" hint="Optional — AI Content Preparation can propose one.">
+        <Field label="Summary / standfirst" htmlFor="ce-sum" className="col-span-6" hint="Optional — the AI assistant below or AI Content Preparation can propose one.">
           <Textarea id="ce-sum" rows={2} value={a.summary ?? ""} onChange={(e) => set({ summary: e.target.value })} />
         </Field>
+        <AiAssist
+          draft={a}
+          saved={!!article}
+          onApply={(patch, what) => {
+            set(patch);
+            toast("success", `${what} applied to the draft`, "Save to keep it.");
+          }}
+        />
         <div className="col-span-6">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[12.5px] font-medium text-ink-2">Images & captions</span>

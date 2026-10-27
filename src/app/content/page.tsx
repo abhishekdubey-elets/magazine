@@ -64,9 +64,14 @@ function ContentLibrary() {
         title="Content Library"
         description="Approved copy, interviews and messages for every issue. Content stays separate from layout — pages reference it."
         actions={
-          <Button variant="primary" onClick={() => setEditing("new")}>
-            <Plus /> Add content
-          </Button>
+          <>
+            <Button href={routes.prepare()} variant="secondary">
+              <Sparkles /> AI Content Preparation
+            </Button>
+            <Button variant="primary" onClick={() => setEditing("new")}>
+              <Plus /> Add content
+            </Button>
+          </>
         }
       />
       <Card className="p-3">
@@ -201,8 +206,8 @@ function ContentLibrary() {
                           <Button size="icon-sm" variant="ghost" aria-label={`Edit ${a.title}`} onClick={() => setEditing(a)}>
                             <Pencil />
                           </Button>
-                          <Link href={routes.prepare(a.id)} aria-label={`Prepare ${a.title} with AI`} className="grid size-8 place-items-center rounded-md text-ai hover:bg-ai-50">
-                            <Sparkles className="size-4" />
+                          <Link href={routes.prepare(a.id)} aria-label={`Prepare ${a.title} with AI`} title="AI Content Preparation: classify, summary, pull quotes, headlines (optional)" className="flex h-8 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-ai hover:bg-ai-50">
+                            <Sparkles className="size-4" /> AI prep
                           </Link>
                         </div>
                       </td>
