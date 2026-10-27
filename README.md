@@ -1,4 +1,4 @@
-# Elets PressFlow AI — demo
+# Elets PressFlow AI
 
 **From editorial content to publication-ready pages.**
 
@@ -10,6 +10,85 @@ running heads with edge tabs, dark folio tabs).
 
 All people, organisations and figures in the sample content are fictional. Sample photography is
 locally generated SVG artwork — no external services or API keys are needed.
+
+## Project status — 27 October 2026
+
+**Live:** https://pressflow-seven.vercel.app (Vercel project `pressflow`, team abhi-elets), deployed
+from branch `feature/pressflow-demo` at commit `a1870ca`. It currently runs in **browser demo mode**
+because no database or credentials are configured yet; the team backend and the InDesign print
+pipeline are deployed but switched off until their environment variables are set.
+
+### What is built
+
+| Milestone | Commit | State |
+| --- | --- | --- |
+| Product demo: content library, AI preparation, Layout Studio, QA with fixes, Export Center, templates, settings, guided demo | `5393855` | Done, live |
+| Create Like This: analyse a reference magazine PDF in the browser and build a similar issue | `5393855` | Done, live |
+| Automated print pipeline on the Adobe InDesign API: build manifest, ExtendScript build script, S3 staging, PDF/X + INDD + IDML + page previews, preflight report | `256071a`, `2c82b41` | Built; needs Adobe + S3 credentials |
+| Team backend: Postgres, Google Workspace sign-in, roles, shared workspace with conflict protection, audit trail, article history | `e3b4c79` | Built; needs `DATABASE_URL` + sign-in settings |
+| Print-quality protection: server-stamped approvals, pre-build gates, untouched image originals, licensed-font checks, archived outputs, editor release sign-off | `e3b4c79` | Built; gates work without Adobe, builds need Adobe |
+| Server AI (Claude) with stored proposals and accept/reject log | `e3b4c79` | Built; uses built-in rules until `ANTHROPIC_API_KEY` is set |
+| Fix: Layout Studio crashed when the selected publication had no pages; screen-level error page | `a1870ca` | Done, live |
+
+**Principle kept throughout:** the browser is for preparing, proofing and approving; only Adobe
+InDesign produces print files, and nothing reaches it unless the quality gates pass.
+
+### How it has been verified
+
+- Type check, ESLint (`src/`) and production build pass.
+- 52 automated API checks against a local server-mode instance (PGlite database, local storage,
+  development sign-in): sign-in and domains, every role restriction, edit conflicts, approval stamps
+  and re-review after edits, article history, original-image upload and measurement, font parsing,
+  every print gate, team administration and suspension, AI proposal logging, audit trail. All pass.
+- Browser tests of first-run setup, approval in Layout Studio, edit-after-approval, Settings (fonts,
+  team) and the demo mode on the live site.
+- The InDesign build script was run against a simulated InDesign (`scripts/indesign-mock.mjs`):
+  22 pages, 26 output files, no script errors.
+
+**Not verified yet:** a real job on Adobe's servers (typesetting, preflight presets, fonts and image
+placement inside InDesign), archiving real outputs to S3, Google sign-in against a real OAuth
+client, a hosted Postgres database, and Claude responses. These need the accounts listed below.
+
+### To switch on the full product
+
+| Needed | Used for | Where |
+| --- | --- | --- |
+| Hosted Postgres (Neon, Supabase…) → `DATABASE_URL` | Team workspace | Vercel env |
+| Google OAuth client → `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`; `AUTH_SECRET`, `APP_URL`, `AUTH_ALLOWED_DOMAINS`, `ADMIN_EMAILS` | Sign-in | Vercel env + Google Cloud |
+| S3 bucket + IAM user → `S3_*`, bucket CORS rule | Originals, fonts, job files, archived outputs | AWS + Vercel env |
+| Adobe Developer Console project with InDesign API → `ADOBE_CLIENT_ID`, `ADOBE_CLIENT_SECRET`, `ADOBE_SCOPES` | Print builds | Adobe + Vercel env |
+| Licensed OTF/TTF files for the house fonts | No font substitution in print | Settings → Licensed fonts |
+| Optional: `ANTHROPIC_API_KEY`, `CRON_SECRET` | AI suggestions; daily archive of unwatched builds | Vercel env |
+
+Then redeploy, sign in as an admin, choose **Set up with the sample issue**, upload fonts, set roles,
+and run **Export Center → Check print readiness** followed by a first print build. Details are in
+[Team backend](#team-backend-server-mode) and
+[Print production](#print-production-with-the-adobe-indesign-api).
+
+### Known limitations and open items
+
+- First real InDesign run will likely need tuning (font names as InDesign reports them, preset
+  settings, image fitting); bump `SCRIPT_VERSION` after changing `build.jsx`.
+- Proofs in the browser use web fonts (Roboto, Bebas Neue…); the printed result depends on the
+  licensed fonts uploaded for InDesign.
+- Edits made while offline are kept in the open tab and sent on reconnect; closing the tab while
+  offline loses them (the app warns before leaving).
+- Conflicts resolve as "the first save wins": the later editor's change is replaced by the server
+  copy and they are told; there is no merge of simultaneous edits.
+- Vercel Hobby runs the archive cron once a day; builds are otherwise finalised when someone has the
+  Export Center open.
+- The demo data and Create Like This analyses in demo mode live only in the browser (localStorage).
+- `scripts/indesign-mock.mjs` has four ESLint style errors (test tooling only).
+- The code is not yet in a hosted Git repository; deploys are made from this machine with the
+  Vercel CLI.
+
+### Suggested next steps
+
+1. Create the accounts above and run the first real print build on a few pages; compare the
+   InDesign PDF with the browser proof.
+2. Upload the licensed house fonts and map them in Settings → InDesign integration.
+3. Push the repository to GitHub and connect it to Vercel for preview deployments per branch.
+4. Pilot with one issue and the editorial team; tune templates and gates from real use.
 
 ## Run it
 
@@ -60,7 +139,9 @@ pdf.js — the file is never uploaded.
 | Exports: PDF proof (bleed + crop marks), web PDF, PNG page ZIP, JSON content package, InDesign handoff ZIP, print view (vector, via browser print) | Real downloadable files |
 | Create Like This — measurement of a reference PDF (boxes, type, grid, images, colour, sections) | Real, in-browser (pdf.js) |
 | Create Like This — page classification and style inference | Rule-based heuristics on measured data (labelled) |
-| "AI" — classification, summary, pull quotes, headlines, image opportunities, layout recommendation, trim proposals | Simulated with deterministic local heuristics (labelled in the UI) |
+| "AI" — classification, summary, pull quotes, headlines | Claude on the server when configured (server mode); otherwise deterministic local heuristics (labelled in the UI) |
+| "AI" — image opportunities, layout recommendation, trim proposals | Deterministic local heuristics |
+| Team workspace, sign-in, roles, approvals, audit trail | Real when `DATABASE_URL` is set (server mode); browser-only demo otherwise |
 | Layout generation progress | Simulated service latency around the real engine |
 | Print-ready PDF/X, `.indd`, `.idml`, Adobe preflight | Real, via the Adobe InDesign API once configured (see below) |
 | InDesign integration | Server pipeline in `src/server/indesign`; nothing is faked when it is not configured |
@@ -87,7 +168,21 @@ src/
     exporter.ts        PDF / PNG / JSON / handoff package generation
     reference/         Create Like This: analyze.ts (pdf.js measurement), derive.ts (templates + issue)
     store.ts           Zustand store with localStorage persistence and undo/redo
-  services/indesign.ts InDesign integration contract and manifest builder
+    roles.ts           Team roles and permissions (shared by app and server)
+    sync/              Server-mode sync engine, collections, original-image upload
+    indesign/          InDesign build manifest (types + builder)
+  services/            Browser clients for InDesign jobs and server AI
+  server/
+    db/                Drizzle schema and connection (Postgres / PGlite)
+    auth/              Google Workspace sign-in, sessions, role checks
+    workspace/         Sync with version checks and editorial rules
+    print/             Print gates, font library, InDesign job records and release
+    indesign/          InDesign API pipeline and the ExtendScript build script
+    assets/            Original-image measurement and previews
+    ai/                Claude editorial suggestions
+    storage/           S3 or local file storage
+  middleware.ts        Sign-in required for every page in server mode
+drizzle/               SQL migrations
 ```
 
 ## Content conventions
