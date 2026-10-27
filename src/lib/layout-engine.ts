@@ -116,15 +116,36 @@ function frameText(frame: FrameSpec, page: Page, article: Article | undefined, p
   return { text: articleValue(article, frame.bind, pub), overridden: false };
 }
 
-export function frameImage(frame: FrameSpec, page: Page, article: Article | undefined): string | null | undefined {
+export function frameImage(frame: FrameSpec, page: Page, article: Article | undefined, ctx?: LayoutContext): string | null | undefined {
   const bind = frame.bind ?? "image.0";
   if (bind in page.imageOverrides) return page.imageOverrides[bind];
+  const story = storyBind(bind);
+  if (story && ctx) {
+    const a = storyArticle(ctx, page, story.n);
+    return a?.imageIds[0] ?? frame.defaultImageId;
+  }
   if (article && bind.startsWith("image.")) {
     const id = article.imageIds[Number(bind.split(".")[1])];
     if (id) return id;
   }
   return frame.defaultImageId;
 }
+
+/* ------------------------------------------------- multi-story pages */
+
+/** Parse a `story.N.field` binding (news pages). */
+export function storyBind(bind: string | undefined): { n: number; field: string } | null {
+  const m = bind?.match(/^story\.(\d)\.(\w+)$/);
+  return m ? { n: Number(m[1]), field: m[2] } : null;
+}
+
+/** The N-th (1-based) secondary story of a page. */
+export function storyArticle(ctx: LayoutContext, page: Page, n: number): Article | undefined {
+  const id = page.storyIds?.[n - 1];
+  return id ? ctx.articles[id] : undefined;
+}
+
+const STORY_FIELD: Record<string, BindKey> = { title: "title", subtitle: "subtitle", body: "body", byline: "byline", caption: "caption.0", summary: "summary" };
 
 /** Pages carrying a story, in reading order. */
 export function storyPages(pages: Page[], articleId: string) {
@@ -263,9 +284,40 @@ export function resolvePage(ctx: LayoutContext, page: Page): ResolvedPage {
       empty: false,
     };
 
+    const sb = storyBind(frame.bind);
     if (frame.kind === "image") {
-      el.imageId = generated || frame.defaultImageId ? frameImage(frame, page, article) : undefined;
+      el.imageId = generated || frame.defaultImageId ? frameImage(frame, page, article, ctx) : undefined;
       el.empty = !el.imageId;
+    } else if (frame.kind === "text" && sb) {
+      // Secondary story on a multi-story page: its own article, fitted into this frame only.
+      const sa = storyArticle(ctx, page, sb.n);
+      const override = page.contentOverrides[overrideKey(frame)];
+      if (sb.field === "body") {
+        const body = override ?? sa?.body ?? "";
+        if (generated && body) {
+          const paras = parseBody(body);
+          const fit = fitFrame(paras, { p: 0, w: 0 }, { width: g.w, height: g.h, columns: g.columns, gutter: frame.gutter ?? ctx.settings.page.gutter }, style, false);
+          el.slices = fit.slices;
+          el.text = fit.slices.map((s) => s.text).join("\n\n");
+          el.fit = fit.linesAvailable ? fit.linesUsed / fit.linesAvailable : 0;
+          const left = remainingWords(paras, fit.end);
+          if (left > 0) {
+            el.oversetWords = left;
+            el.fit = Math.max(el.fit, 1.01);
+          }
+        }
+        el.textOverridden = override !== undefined;
+        el.empty = !(el.slices?.length);
+      } else {
+        const text = override ?? (sa && generated ? articleValue(sa, STORY_FIELD[sb.field] ?? "title", ctx.publication) : "");
+        el.text = text;
+        el.textOverridden = override !== undefined;
+        el.empty = !text.trim();
+        if (text) {
+          const inset = frame.inset ?? 0;
+          el.fit = blockFill(text, { width: g.w - inset * 2, height: g.h - inset * 2 }, style);
+        }
+      }
     } else if (frame.kind === "text") {
       if (frame.bind === "body") {
         const key = `${page.id}|${frame.id}`;

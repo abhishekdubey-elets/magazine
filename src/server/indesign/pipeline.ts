@@ -17,7 +17,7 @@ import buildScript from "./script/build.jsx?raw";
 
 export const SCRIPT_NAME = "pressflow.build-issue";
 /** Bump whenever build.jsx changes so Adobe registers the new version. */
-export const SCRIPT_VERSION = "1.0.0";
+export const SCRIPT_VERSION = "1.1.0";
 
 export class PipelineError extends Error {
   constructor(

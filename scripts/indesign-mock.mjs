@@ -100,6 +100,28 @@ function Folder(p) {
 /* ------------------------------------------------------- object model */
 
 let docCounter = 0;
+class Layer {
+  constructor(name) {
+    this.name = name;
+    this.isValid = true;
+  }
+}
+class MasterSpread {
+  constructor(doc, index) {
+    this.namePrefix = String.fromCharCode(65 + index);
+    this.baseName = "Master";
+    this.pagesList = [new Page(doc, 0), new Page(doc, 1)];
+    this.pagesList.forEach((p) => (p.isMaster = true));
+    this.isValid = true;
+  }
+  get name() {
+    return `${this.namePrefix}-${this.baseName}`;
+  }
+  get pages() {
+    const list = this.pagesList;
+    return { length: list.length, item: (i) => list[i] };
+  }
+}
 class Swatch {
   constructor(name, colorValue) {
     this.name = name;
@@ -245,6 +267,9 @@ class PageItem {
     this.page = page;
     this.geometricBounds = props.geometricBounds;
     this.label = "";
+    this.name = "";
+    if (props.itemLayer !== undefined && !(props.itemLayer instanceof Layer)) throw new Error("itemLayer must be a Layer");
+    this.itemLayer = props.itemLayer ?? null;
     const stops = () => {
       const list = [{}, {}];
       return { get length() { return list.length; }, add: () => list.push({}), item: (i) => list[i] };
@@ -327,6 +352,7 @@ class Page {
     this.items = [];
     this.marginPreferences = {};
     this.name = String(index + 1);
+    this.appliedMaster = null;
     this.rectangles = { add: (props) => new Rectangle(this, props) };
     this.textFrames = { add: (props) => new TextFrame(this, props) };
   }
@@ -355,7 +381,10 @@ class Doc {
         },
       },
     );
-    this.masterSpreads = { item: () => ({ pages: { length: 2, item: () => ({ marginPreferences: {} }) } }) };
+    this.masterSpreads = new Collection((p) => new MasterSpread(this, this.masterSpreads.list.length));
+    this.masterSpreads.add();
+    this.layers = new Collection((p) => new Layer(p.name));
+    this.layers.add({ name: "Layer 1" });
     this.swatches = { itemByName: (n) => (n === "None" || n === "Paper" ? new Swatch(n) : new Invalid()) };
     this.colors = new Collection((p) => {
       if (!Array.isArray(p.colorValue) || p.colorValue.length !== 3 || p.colorValue.some((v) => !(v >= 0 && v <= 255))) throw new Error(`Bad colorValue ${p.colorValue}`);
@@ -440,7 +469,7 @@ const ctx = {
   File,
   Folder,
   ...Object.fromEntries(
-    ["GradientType", "MeasurementUnits", "RulerOrigin", "ColorModel", "ColorSpace", "Justification", "Capitalization", "VerticalJustification", "FitOptions", "CornerOptions", "FontStatus", "ExportFormat", "ExportRangeOrAllPages", "JPEGOptionsQuality", "PageNumberingOptions", "SaveOptions", "UserInteractionLevels"].map((n) => [n, enumProxy(n)]),
+    ["SpecialCharacters", "NothingEnum", "GradientType", "MeasurementUnits", "RulerOrigin", "ColorModel", "ColorSpace", "Justification", "Capitalization", "VerticalJustification", "FitOptions", "CornerOptions", "FontStatus", "ExportFormat", "ExportRangeOrAllPages", "JPEGOptionsQuality", "PageNumberingOptions", "SaveOptions", "UserInteractionLevels"].map((n) => [n, enumProxy(n)]),
   ),
 };
 
@@ -455,6 +484,7 @@ if (result.status !== "SUCCESS") process.exit(2);
 const report = JSON.parse(fs.readFileSync(path.join(work, "output", "report.json"), "utf8"));
 const missingUploads = result.assetsToBeUploaded.filter((a) => !fs.existsSync(path.join(work, a.path)));
 console.log(`Outputs: ${result.assetsToBeUploaded.length} files (${missingUploads.length} missing on disk) · data ${result.dataURL}`);
+console.log(`Structure: ${report.parents ?? 0} parent pages, layers ${(report.layers ?? []).join("/") || "none"}, ${report.styles ?? 0} paragraph styles`);
 console.log(`Report: ${report.pages} pages, ${report.stories} stories, ${report.images.length} images (${report.images.filter((i) => i.status !== "placed").length} not placed), ${report.overset.length} overset (estimated), ${report.autoFitted.length} auto-fitted, missing fonts: ${report.missingFonts.join(", ") || "none"}, warnings: ${report.warnings.length}`);
 for (const w of report.warnings.slice(0, 20)) console.log("  ! " + w);
 if (missingUploads.length) process.exit(3);
@@ -474,9 +504,12 @@ const linkData = (p) => {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const styleOf = (n) => manifest.paragraphStyles[n] ?? {};
 const storyText = new Map(manifest.stories.map((s) => [s.id, s.paragraphs]));
+const parentsById = new Map((manifest.parents ?? []).map((p) => [p.id, p]));
 const svgs = manifest.pages.map((pg) => {
   const parts = [`<rect x="${-B}" y="${-B}" width="${W + 2 * B}" height="${H + 2 * B}" fill="${pg.background ?? "#fff"}"/>`];
-  for (const it of pg.items) {
+  const parent = pg.parent ? parentsById.get(pg.parent) : null;
+  const furniture = parent ? (pg.side === "left" ? parent.left : parent.right) : [];
+  for (const it of [...furniture, ...pg.items]) {
     const [t, l, b, r] = it.bounds;
     if (it.type === "rect" && it.gradient) {
       const gid = `g${Math.random().toString(36).slice(2)}`;
@@ -494,7 +527,7 @@ const svgs = manifest.pages.map((pg) => {
       const paras = it.paragraphs ?? (it.story ? storyText.get(it.story)?.slice(0, 3) : []) ?? [];
       const st = styleOf(paras[0]?.style);
       const size = Math.min(st.size ?? 9, (b - t) * 0.9);
-      const text = paras.map((p) => p.text).join(" ¶ ").slice(0, 160);
+      const text = it.autoPageNumber ? String(pg.number) : paras.map((p) => p.text).join(" ¶ ").slice(0, 160);
       parts.push(`<rect x="${l}" y="${t}" width="${r - l}" height="${b - t}" fill="none" stroke="#2f6bff" stroke-opacity=".35" stroke-width=".5"/>`);
       parts.push(`<foreignObject x="${l + it.inset[1]}" y="${t + it.inset[0]}" width="${Math.max(1, r - l - it.inset[1] - it.inset[3])}" height="${Math.max(1, b - t)}"><div xmlns="http://www.w3.org/1999/xhtml" style="font:${st.fontStyle?.includes("Bold") || st.fontStyle?.includes("Black") ? 700 : 400} ${size}px/${(st.leading ?? size * 1.2) / size} '${st.family ?? "sans-serif"}',sans-serif;color:${st.color ?? "#000"};text-align:${st.align === "justify" ? "justify" : st.align ?? "left"};overflow:hidden;height:100%;column-count:${it.columns};column-gap:${it.gutter}px;text-transform:${st.caps ? "uppercase" : "none"}">${esc(text)}</div></foreignObject>`);
     }

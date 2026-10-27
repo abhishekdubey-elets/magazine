@@ -17,11 +17,19 @@ export type ID = string;
 export type ContentType =
   | "interview"
   | "leadership-message"
+  | "government-perspective"
   | "feature"
   | "news-report"
   | "case-study"
   | "event-report"
+  | "company-profile"
   | "editorial";
+
+/**
+ * The six recurring editorial page formats the magazine team produces
+ * (Reference-to-Magazine Studio). Each maps to a parameterised template.
+ */
+export type EditorialFormat = "interview" | "feature" | "government-perspective" | "event-report" | "news-page" | "company-profile";
 
 export type ApprovalStatus = "draft" | "in-review" | "needs-changes" | "approved";
 
@@ -151,6 +159,13 @@ export interface Publication {
   grid?: { marginTop: number; marginBottom: number; marginInside: number; marginOutside: number; columns: number; gutter: number };
   /** Reference profile this issue was modelled on (Create Like This). */
   referenceId?: ID;
+  /** Design specification version the issue was generated from. */
+  designSpecId?: ID;
+  designSpecVersion?: number;
+  /** Issue plan (Reference-to-Magazine Studio); pages are generated from it. */
+  plan?: IssuePlan;
+  /** Pilot run timings and comparison (Reference-to-Magazine Studio). */
+  pilot?: PilotRun;
   updatedAt: string;
   updatedBy: string;
   coverColor: string;
@@ -246,7 +261,15 @@ export type BindKey =
   | "pullquote.1"
   | "section"
   | "facts"
-  | "static";
+  | "static"
+  | StoryBindKey;
+
+/**
+ * Bindings for pages that carry several stories (news pages): `story.N.field`
+ * reads the N-th entry of `Page.storyIds` (1-based). Story bodies are fitted
+ * into their own frame and never thread onto other pages.
+ */
+export type StoryBindKey = `story.${1 | 2 | 3 | 4 | 5}.${"title" | "subtitle" | "body" | "byline" | "image" | "caption" | "summary"}`;
 
 export interface FrameSpec {
   id: string;
@@ -317,6 +340,10 @@ export interface Template {
   derivation?: "geometry" | "adapted";
   /** Reference page the geometry was taken from (1-based). */
   sourcePage?: number;
+  /** Editorial format this template implements (Reference-to-Magazine Studio). */
+  format?: EditorialFormat;
+  /** Confidence that this template reproduces the reference's layout for the format (0–1). */
+  fidelity?: number;
 }
 
 /* ------------------------------------------------------------------ Pages */
@@ -345,7 +372,11 @@ export interface Page {
   sectionId?: ID;
   templateId?: ID;
   articleId?: ID;
+  /** Further stories on a multi-story page (news pages), read by `story.N.*` bindings. */
+  storyIds?: ID[];
   status: PageStatus;
+  /** Editorial format this page was planned as (Reference-to-Magazine Studio). */
+  format?: EditorialFormat;
   /**
    * Text edits made in Layout Studio, keyed by bind key ("title", "caption.0")
    * or "frame:<frameId>" for static frames. Never written back silently.
@@ -674,4 +705,222 @@ export interface ReferenceProfile {
   /** Pages larger previews were rendered for (archetype representatives). */
   previews: Record<number, string>;
   notes: string[];
+  /** How much measured data each inferred property rests on (for confidence). */
+  evidence?: ReferenceEvidence;
+  /** Pages whose size differs from page 1 (mixed page sizes), with their size in mm. */
+  oddSizes?: { number: number; width: number; height: number }[];
+  /** Reviewable design specification derived from this reference (versioned). */
+  spec?: DesignSpec;
+}
+
+export interface ReferenceEvidence {
+  /** Pages with usable body text that contributed to margins/columns. */
+  gridPages: number[];
+  gutterSamples: number;
+  marginSamples: { top: number; bottom: number; inside: number; outside: number };
+  bodyBlocks: number;
+  headlineSamples: number;
+  deckSamples: number;
+  captionSamples: number;
+  textPages: number;
+  blankPages: number[];
+}
+
+/* ------------------------------------------------- Design specification */
+
+export type FindingSource = "extracted" | "inferred" | "default" | "confirmed";
+
+/** One property of the reference design with how sure we are and why. */
+export interface Finding<T> {
+  value: T;
+  /** 0–1. */
+  confidence: number;
+  source: FindingSource;
+  /** Reference pages supporting the value. */
+  evidence: number[];
+  note?: string;
+  /** Value before an editor changed it (kept for the record). */
+  detected?: T;
+}
+
+export interface TypeSpec {
+  font: string;
+  role: FontRole;
+  size: number;
+  leading: number;
+  weight: number;
+  align?: "left" | "center" | "right" | "justify";
+}
+
+export interface FurnitureSpec {
+  runningHead: "top-outside" | "top-inside" | "top-center" | "none";
+  folio: "bottom-outside" | "bottom-center" | "bottom-inside" | "none";
+  /** Running-head height from the top in mm. */
+  headY: number;
+  /** Folio baseline from the bottom in mm. */
+  folioY: number;
+}
+
+export interface LayoutSpec {
+  format: EditorialFormat;
+  /** Template id in the workspace that implements this format for the reference. */
+  templateId: ID;
+  /** geometry: measured from a reference page · adapted: house template rescaled · inferred: no such page in the reference. */
+  derivation: "geometry" | "adapted" | "inferred";
+  sourcePage?: number;
+  /** Other reference pages of the same kind (alternative models). */
+  examples: number[];
+  confidence: number;
+  note?: string;
+}
+
+export const DESIGN_SPEC_SCHEMA = "pressflow.design-spec/1";
+
+/**
+ * Reusable design system learnt from a reference magazine. Every property is a
+ * Finding (value + confidence + evidence). Editors review and confirm it; the
+ * issue planner and InDesign build read the confirmed values.
+ */
+export interface DesignSpec {
+  schema: typeof DESIGN_SPEC_SCHEMA;
+  id: ID;
+  referenceId: ID;
+  version: number;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  identity: {
+    palette: Finding<string[]>;
+    accent: Finding<string>;
+    logoPlacement: Finding<"top-left" | "top-center" | "top-right" | "none">;
+  };
+  page: {
+    trim: Finding<{ width: number; height: number }>;
+    orientation: "portrait" | "landscape";
+    bleed: Finding<number>;
+    margins: Finding<{ top: number; bottom: number; inside: number; outside: number }>;
+    columns: Finding<number>;
+    gutter: Finding<number>;
+    furniture: Finding<FurnitureSpec>;
+  };
+  typography: {
+    body: Finding<TypeSpec>;
+    headline: Finding<TypeSpec>;
+    deck: Finding<TypeSpec | null>;
+    caption: Finding<TypeSpec | null>;
+    quote: Finding<TypeSpec | null>;
+    subheading: Finding<TypeSpec | null>;
+    /** Fonts in the reference with the font substituted in the browser preview. */
+    fonts: { name: string; share: number; substitute: string; available: boolean }[];
+    /** Paragraph style names the InDesign build will create. */
+    styleNames: string[];
+  };
+  images: {
+    aspectRatios: Finding<{ ratio: number; share: number; label: string }[]>;
+    fullBleedShare: Finding<number>;
+    density: Finding<"sparse" | "balanced" | "dense">;
+  };
+  structure: {
+    sections: Finding<{ name: string; pages: number[] }[]>;
+    pageTypes: { type: RefPageType; pages: number[] }[];
+    /** Running order of the reference as detected (page type per measured page). */
+    order: RefPageType[];
+  };
+  layouts: LayoutSpec[];
+  print: {
+    pdfPreset: string;
+    minPpi: number;
+    targetPpi: number;
+  };
+  review: {
+    status: "draft" | "confirmed";
+    confirmedBy?: string;
+    confirmedAt?: string;
+    /** Properties an editor changed by hand. */
+    edited: string[];
+    warnings: string[];
+  };
+}
+
+/* ------------------------------------------------------- Issue plan */
+
+export type PlanEntryKind = "cover" | "contents" | "editorial" | "advertisement" | "closing" | "continuation" | EditorialFormat;
+
+export interface PlanEntry {
+  id: ID;
+  /** 1-based page number in the plan. */
+  number: number;
+  kind: PlanEntryKind;
+  title: string;
+  articleId?: ID;
+  /** Additional stories on a news page. */
+  storyIds?: ID[];
+  templateId?: ID;
+  sectionId?: ID;
+  /** Entry this page continues (continuation pages). */
+  continuesId?: ID;
+  /** Reserved placement (advertisement, partner page) that must survive generation. */
+  reserved?: boolean;
+  /** Why this entry was planned the way it was (template suggestion, capacity). */
+  reason?: string;
+  requiredImages: number;
+  imagesAvailable: number;
+  /** Estimated words that will not fit on the planned pages (0 = fits). */
+  oversetWords?: number;
+}
+
+export interface IssuePlan {
+  id: ID;
+  designSpecId: ID;
+  designSpecVersion: number;
+  referenceId: ID;
+  topic: string;
+  title: string;
+  issueLabel: string;
+  pageCount: number;
+  entries: PlanEntry[];
+  /** Article ids the editor selected for this issue, in preferred order. */
+  articleIds: ID[];
+  includeAds: boolean;
+  status: "draft" | "approved" | "generated";
+  approvedBy?: string;
+  approvedAt?: string;
+  generatedAt?: string;
+  notes: string[];
+  /** Conflicts the planner could not resolve (generation is refused while any remain). */
+  unresolved: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/* ------------------------------------------------------- Pilot run */
+
+export interface PilotTimings {
+  analysisMs: number;
+  planningMs: number;
+  generationMs: number;
+  buildMs: number;
+  qaMs: number;
+  correctionMs: number;
+}
+
+export interface PilotRun {
+  id: ID;
+  referenceId: ID;
+  startedAt: string;
+  /** Reference pages chosen as the pilot sample. */
+  referencePages: number[];
+  pageCount: number;
+  formatsTested: EditorialFormat[];
+  timings: PilotTimings;
+  /** Entered by the team: minutes the same pages take by hand. */
+  manualBaselineMinutes?: number;
+  corrections: number;
+  qaFailuresBefore: number;
+  unresolvedFailures: number;
+  /** What the build produced: none · browser preview · real InDesign output. */
+  output: "none" | "browser-preview" | "indesign";
+  approvalStatus: "pending" | "approved" | "released" | "rejected";
+  /** Event log with timestamps (how the timings were measured). */
+  events: { at: string; stage: keyof PilotTimings | "note"; detail: string }[];
 }

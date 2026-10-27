@@ -213,7 +213,7 @@ function ElementView({ el, r, ctx, uploads, mode }: { el: ResolvedElement; r: Re
     case "image":
       return <ImageFrame el={el} uploads={uploads} mode={mode} />;
     case "text":
-      if (f.bind === "body") return <BodyFrame el={el} r={r} />;
+      if (f.bind === "body" || f.bind?.endsWith(".body")) return <BodyFrame el={el} r={r} />;
       if (f.bind === "facts") return <FactsFrame el={el} r={r} />;
       if (f.role === "pullquote" && !el.empty) return <PullQuote el={el} accent={r.accent} />;
       return (

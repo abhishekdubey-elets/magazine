@@ -18,7 +18,7 @@ import { bestModels, buildFromReference, DERIVABLE, modelTemplate, REF_TYPE_LABE
 import { useStore } from "@/lib/store";
 import type { Article, Page, ReferenceProfile, RefPage, RefPageType } from "@/lib/types";
 
-const TYPE_TONE: Record<RefPageType, string> = {
+export const TYPE_TONE: Record<RefPageType, string> = {
   cover: "#1d2b4f",
   contents: "#475569",
   message: "#c2410c",
@@ -268,7 +268,7 @@ export function ReferenceReport({ profile }: { profile: ReferenceProfile }) {
 
 /* --------------------------------------------------------------- parts */
 
-function GridDiagram({ profile }: { profile: ReferenceProfile }) {
+export function GridDiagram({ profile }: { profile: ReferenceProfile }) {
   const { width: W, height: H } = profile.trim;
   const m = profile.margins;
   const live = W - m.inside - m.outside;
@@ -290,7 +290,7 @@ function sampleFor(kind: RefPageType, articles: Article[]) {
   return articles.find((a) => a.id === pref[kind]) ?? articles.find((a) => (kind === "interview" ? a.contentType === "interview" : kind === "message" ? a.contentType === "leadership-message" : a.contentType === "feature") && a.imageIds.length);
 }
 
-function ModelCard({ profile, kind, model, onModel }: { profile: ReferenceProfile; kind: RefPageType; model?: number; onModel: (n: number) => void }) {
+export function ModelCard({ profile, kind, model, onModel }: { profile: ReferenceProfile; kind: RefPageType; model?: number; onModel: (n: number) => void }) {
   const articles = useStore((s) => s.articles);
   const settings = useStore((s) => s.settings);
   const uploads = useStore((s) => s.uploads);
@@ -367,7 +367,7 @@ function ModelCard({ profile, kind, model, onModel }: { profile: ReferenceProfil
   );
 }
 
-function PageDetail({ profile, page, onClose, onType }: { profile: ReferenceProfile; page: RefPage; onClose: () => void; onType: (t: RefPageType) => void }) {
+export function PageDetail({ profile, page, onClose, onType }: { profile: ReferenceProfile; page: RefPage; onClose: () => void; onType: (t: RefPageType) => void }) {
   const img = profile.previews[page.number] ?? page.thumb;
   const { width: W, height: H } = profile.trim;
   const body = profile.body.size;

@@ -2,7 +2,7 @@
 
 import { ink, MM_PER_PT, paragraphStyles } from "../design-tokens";
 import { findImage, linkName } from "../images";
-import { resolvePage, storyBody, type LayoutContext, type ResolvedPage } from "../layout-engine";
+import { resolvePage, storyArticle, storyBind, storyBody, type LayoutContext, type ResolvedPage } from "../layout-engine";
 import { measureMm, parseBody } from "../text-engine";
 import { tocEntries } from "../toc";
 import type { FontRole, ImageAsset, ResolvedElement, TextStyle } from "../types";
@@ -17,6 +17,7 @@ import {
   type IdRun,
   type IdStory,
   type IdGradient,
+  type IdParent,
   type IdText,
   type InDesignManifestV2,
 } from "./manifest-types";
@@ -204,25 +205,28 @@ export function buildInDesignManifestV2(ctx: LayoutContext, uploads: ImageAsset[
   const pages = ctx.pages.filter((p) => pageNumbers.includes(p.number)).sort((a, b) => a.number - b.number);
   const resolved = pages.map((p) => resolvePage(ctx, p));
   const stories = new Map<string, IdStory>();
+  const parents = new Map<string, IdParent>();
 
   const outPages: IdPage[] = resolved.map((r) => {
     const items: IdItem[] = [];
     const pid = r.page.id;
-    const add = (it: IdItem) => items.push(it);
+    const add = (it: IdItem) => items.push(withLayer(it));
     // Planned pages have no layout yet: they go out blank (the QA screen already flags them).
     if (!r.template || r.page.status === "planned") {
-      return { number: r.page.number, side: r.isLeft ? "left" : "right", pageId: pid, title: r.page.title, items };
+      return { number: r.page.number, side: r.isLeft ? "left" : "right", pageId: pid, title: r.page.title, parent: null, items };
     }
     const bg = cssColor(r.template.background);
     const elements = [...r.elements].sort((a, c) => (a.frame.z ?? 0) - (c.frame.z ?? 0));
     for (const el of elements) emitElement(b, ctx, r, el, add, stories);
-    if (r.template.furniture !== "none") emitFurniture(b, ctx, r, add, r.template.furniture === "folio");
+    // Recurring furniture lives on parent pages (one per section and furniture kind).
+    const parent = r.template.furniture !== "none" ? ensureParent(b, ctx, r, parents, r.template.furniture === "folio") : null;
     return {
       number: r.page.number,
       side: r.isLeft ? "left" : "right",
       pageId: pid,
       title: r.page.title,
       background: bg && bg.hex !== "#ffffff" ? bg.hex : undefined,
+      parent,
       items,
     };
   });
@@ -243,6 +247,8 @@ export function buildInDesignManifestV2(ctx: LayoutContext, uploads: ImageAsset[
     },
     fonts: [...b.fonts.values()],
     paragraphStyles: b.styles,
+    parents: [...parents.values()],
+    layers: ["Background", "Images", "Text", "Furniture"],
     pages: outPages,
     stories: [...stories.values()].filter((s) => s.frames.length),
     links: [...b.links.values()],
@@ -252,6 +258,11 @@ export function buildInDesignManifestV2(ctx: LayoutContext, uploads: ImageAsset[
 /* --------------------------------------------------------- elements */
 
 type Add = (it: IdItem) => void;
+
+/** Default layer and object name by item type. */
+function withLayer(it: IdItem): IdItem {
+  return { name: it.label, layer: it.type === "image" ? "Images" : it.type === "text" ? "Text" : "Background", ...it };
+}
 
 function textItem(id: string, label: string, el: { x: number; y: number; w: number; h: number }, extra: Partial<IdText> = {}): IdText {
   return { type: "text", id, label, bounds: box(el.x, el.y, el.w, el.h), columns: 1, gutter: 0, inset: [0, 0, 0, 0], ...extra };
@@ -286,12 +297,13 @@ function emitElement(b: Builder, ctx: LayoutContext, r: ResolvedPage, el: Resolv
     case "text":
       if (f.bind === "body") return emitBody(b, ctx, r, el, add, stories);
       if (f.bind === "facts") return emitFacts(b, r, el, add);
+      if (storyBind(f.bind)?.field === "body") return emitBrief(b, ctx, r, el, add);
       if (el.empty) return;
       if (f.role === "pullquote") {
         const serif = el.style.font === "serif";
         const text = `“${el.text.replace(/^[“"]|[”"]$/g, "")}”`;
         if (!serif) add({ type: "rect", id: `${id}:rule`, label: `${f.label} rule`, bounds: box(geo.x, geo.y, geo.w, 0.8), fill: r.accent });
-        add(textItem(id, f.label, geo, { inset: [serif ? 0 : pt(3), 0, 0, 0], paragraphs: [{ style: b.style("PF/Pull quote", el.style), text }], reportOverset: true }));
+        add(textItem(id, f.label, geo, { inset: [serif ? 0 : pt(3), 0, 0, 0], paragraphs: [{ style: b.style("PF/Pull Quote", el.style), text }], reportOverset: true }));
         return;
       }
       add(
@@ -302,7 +314,7 @@ function emitElement(b: Builder, ctx: LayoutContext, r: ResolvedPage, el: Resolv
           // The browser already shrank auto-fit lines; InDesign re-checks with its own composer.
           autoFit: !!f.autoFit,
           reportOverset: true,
-          paragraphs: [{ style: b.style(hintFor(f.styleId, f.role), el.style), text: el.text.replace(/\r/g, "") }],
+          paragraphs: [{ style: b.style(hintFor(f.styleId, f.role, r.page.pageType === "cover"), el.style), text: el.text.replace(/\r/g, "") }],
         }),
       );
       return;
@@ -317,9 +329,43 @@ function emitElement(b: Builder, ctx: LayoutContext, r: ResolvedPage, el: Resolv
   }
 }
 
-function hintFor(styleId: string | undefined, role: string) {
+/** Conventional InDesign style names per element role (variants get " 2", " 3"… when definitions differ). */
+const ROLE_STYLE: Record<string, string> = {
+  headline: "Headline",
+  deck: "Deck",
+  kicker: "Kicker",
+  intro: "Standfirst",
+  author: "Name",
+  designation: "Designation",
+  byline: "Byline",
+  caption: "Caption",
+  pullquote: "Pull Quote",
+  "section-label": "Running Head",
+  folio: "Page Number",
+  facts: "Facts",
+  signature: "Signature",
+  body: "Body",
+};
+
+function hintFor(styleId: string | undefined, role: string, cover = false) {
+  if (cover && role === "headline") return "PF/Cover Title";
+  const byRole = ROLE_STYLE[role];
+  if (byRole) return `PF/${byRole}`;
   const name = styleId ? paragraphStyles[styleId]?.indesignName : undefined;
   return name ? `PF/${name}` : `PF/${role}`;
+}
+
+/** A news brief: its own (unthreaded) story in one frame. */
+function emitBrief(b: Builder, ctx: LayoutContext, r: ResolvedPage, el: ResolvedElement, add: Add) {
+  const sb = storyBind(el.frame.bind)!;
+  const article = storyArticle(ctx, r.page, sb.n);
+  const body = r.page.contentOverrides[el.frame.bind!] ?? article?.body;
+  if (!body) return;
+  const base = el.style;
+  const bodyName = b.style("PF/Body", base);
+  const hName = b.style("PF/Subheading", { ...base, size: base.size + 2, leading: base.leading + 2, weight: 700, color: r.accent, align: "left", spaceAfter: 3 }, { hyphenate: false, keepWithNext: 1 });
+  const paragraphs: IdParagraph[] = parseBody(body).map((p) => ({ style: p.kind === "h" ? hName : bodyName, text: p.words.join(" ") }));
+  add(textItem(`${r.page.id}:${el.id}`, el.frame.label, el, { columns: el.columns, gutter: pt(el.gutter), paragraphs, reportOverset: true }));
 }
 
 function emitBody(b: Builder, ctx: LayoutContext, r: ResolvedPage, el: ResolvedElement, add: Add, stories: Map<string, IdStory>) {
@@ -335,7 +381,7 @@ function emitBody(b: Builder, ctx: LayoutContext, r: ResolvedPage, el: ResolvedE
     const interview = article.contentType === "interview";
     const bodyName = b.style("PF/Body", base);
     const qName = b.style("PF/Body Question", { ...base, weight: 700, color: interview ? accent : base.color, align: base.align === "justify" ? "left" : base.align, spaceAfter: 3 }, { hyphenate: false, keepWithNext: 1 });
-    const hName = b.style("PF/Body Subhead", { ...base, size: base.size + 2, leading: base.leading + 2, weight: 700, color: accent, align: "left", spaceAfter: 3 }, { hyphenate: false, spaceBefore: round2(base.leading * 0.5), keepWithNext: 1 });
+    const hName = b.style("PF/Subheading", { ...base, size: base.size + 2, leading: base.leading + 2, weight: 700, color: accent, align: "left", spaceAfter: 3 }, { hyphenate: false, spaceBefore: round2(base.leading * 0.5), keepWithNext: 1 });
     const dropCap = !!el.slices?.[0]?.dropCap;
     const firstName = dropCap ? b.style("PF/Body First", base, { dropCap: { lines: DROP_CAP_LINES, chars: 1 } }) : bodyName;
     const paras = parseBody(storyBody(ctx.pages, article));
@@ -543,14 +589,33 @@ function emitChart(b: Builder, r: ResolvedPage, el: ResolvedElement, id: string,
   add({ type: "rect", id: `${id}:axis`, label: "Chart axis", bounds: box(el.x, areaTop + areaH, el.w, 0.26), fill: "#1f2633" });
 }
 
-/* --------------------------------------------------------- furniture */
+/* ------------------------------------------------- parent pages (furniture) */
 
-function emitFurniture(b: Builder, ctx: LayoutContext, r: ResolvedPage, add: Add, folioOnly: boolean) {
+/**
+ * Recurring furniture — section tab, running head, folio with InDesign's
+ * automatic page number, issue label and tagline — goes on a parent page per
+ * section (and per furniture kind), so designers edit it once in InDesign.
+ */
+function ensureParent(b: Builder, ctx: LayoutContext, r: ResolvedPage, parents: Map<string, IdParent>, folioOnly: boolean): string {
+  const label = r.section?.id === "sec-front" ? "" : r.section?.name ?? "";
+  const key = `${folioOnly ? "folio" : "full"}:${label || "front"}`;
+  const existing = parents.get(key);
+  if (existing) return existing.id;
+  const prefix = String.fromCharCode(66 + (parents.size % 25)); // B, C, D… (A is InDesign's default)
+  const name = folioOnly ? "Folio only" : label || "Front matter";
+  const parent: IdParent = { id: key, prefix, name, left: [], right: [] };
+  for (const side of ["left", "right"] as const) {
+    const items = parent[side];
+    emitFurniture(b, ctx, r, side === "left", (it) => items.push({ name: it.label, layer: "Furniture", ...it }), folioOnly, label, key);
+  }
+  parents.set(key, parent);
+  return key;
+}
+
+function emitFurniture(b: Builder, ctx: LayoutContext, r: ResolvedPage, left: boolean, add: Add, folioOnly: boolean, label: string, key: string) {
   const pub = ctx.publication;
   const { width: W, height: H } = pub.trim;
-  const left = r.isLeft;
-  const id = `${r.page.id}:furniture`;
-  const label = r.section?.id === "sec-front" ? "" : r.section?.name ?? "";
+  const id = `parent:${key}:${left ? "L" : "R"}`;
   const accent = cssColor(r.accent)!.hex;
   if (!folioOnly && label) {
     add({ type: "rect", id: `${id}:tab`, label: "Section tab", bounds: box(left ? -5 : W - 8, -5, 13, 20), fill: accent });
@@ -566,13 +631,12 @@ function emitFurniture(b: Builder, ctx: LayoutContext, r: ResolvedPage, add: Add
   const arrow = style("body", { weight: 700, size: 11, leading: 12, color: accent === ink.navy ? ink.orange : "#f6b44c", align: "center", spaceAfter: 0 });
   add(textItem(`${id}:arrow`, "Folio arrow", { x: left ? -5 : W - 12, y: top + 1, w: 17, h: 11 }, { verticalAlign: "center", paragraphs: [{ style: b.style("PF/Folio Arrow", arrow), text: left ? ">" : "<" }] }));
   const num = style("body", { weight: 700, size: 11, leading: 12, color: "#1f2633", align: left ? "left" : "right", spaceAfter: 0 });
-  const numText = String(r.page.number);
-  const numW = measureMm(numText, num) + 1;
+  const numW = measureMm("000", num) + 1;
   const small = style("body", { size: 6, leading: 7, color: "#3a4253", align: left ? "left" : "right", spaceAfter: 0 });
   const issue = pub.issueLabel.toUpperCase();
   const issueW = measureMm(issue, small) + 1.5;
   const x0 = left ? 15 : W - 15 - numW;
-  add(textItem(`${id}:number`, "Folio number", { x: x0, y: top + 2.2, w: numW, h: 5 }, { verticalAlign: "center", paragraphs: [{ style: b.style("PF/Folio Number", num), text: numText }] }));
+  add(textItem(`${id}:number`, "Page number", { x: x0, y: top + 2.2, w: numW, h: 5 }, { verticalAlign: "center", autoPageNumber: true, paragraphs: [{ style: b.style("PF/Page Number", num), text: "0" }] }));
   const divX = left ? x0 + numW + 2.2 : x0 - 2.2 - 0.15;
   add({ type: "rect", id: `${id}:divider`, label: "Folio divider", bounds: box(divX, top + 2.2, 0.15, 5), fill: "#9aa1ae" });
   add(textItem(`${id}:issue`, "Folio issue", { x: left ? divX + 2.35 : divX - 2.2 - issueW, y: top + 2.2, w: issueW, h: 5 }, { verticalAlign: "center", paragraphs: [{ style: b.style("PF/Folio Issue", small), text: issue }] }));

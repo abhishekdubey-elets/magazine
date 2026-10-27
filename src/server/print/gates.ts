@@ -85,6 +85,23 @@ export async function runGates(
   }
   const blankPages = manifest.pages.filter((p) => !p.items.length).map((p) => `Page ${p.number} — ${p.title}`);
 
+  /* 0. Issues planned in Reference-to-Magazine Studio: the plan must have been approved and generated. */
+  const pubIds = [...new Set(rows.map((r) => r.publicationId).filter((x): x is string => !!x))];
+  if (pubIds.length) {
+    const pubT = tableOf("publications");
+    const pubs = await d.select().from(pubT).where(and(eq(pubT.orgId, env.orgId), inArray(pubT.id, pubIds)));
+    for (const pub of pubs) {
+      const plan = (pub.data as { plan?: { status?: string; approvedBy?: string; unresolved?: string[] } }).plan;
+      if (!plan) continue;
+      const ok = (plan.status === "approved" || plan.status === "generated") && !!plan.approvedBy && !(plan.unresolved?.length);
+      checks.push(
+        ok
+          ? { id: "plan-approved", label: "Issue plan approved", status: "pass", detail: `Plan approved by ${plan.approvedBy} and generated without unresolved conflicts.` }
+          : { id: "plan-approved", label: "Issue plan approved", status: severe, detail: plan.unresolved?.length ? "The issue plan still has unresolved conflicts." : "The issue plan was not approved by an editor before generation.", items: plan.unresolved ?? [] },
+      );
+    }
+  }
+
   checks.push(
     unknown.length || stale.length
       ? { id: "pages-current", label: "Pages match the server", status: "block", detail: unknown.length ? "Some pages are not on the server." : "Pages changed since this build was prepared — reload and try again.", items: [...unknown, ...stale] }

@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Sparkles,
   WandSparkles,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,6 +28,7 @@ export const NAV: NavItem[] = [
   { href: "/content", label: "Content Library", short: "Content", icon: FileText, description: "Articles, interviews and messages" },
   { href: "/prepare", label: "AI Content Preparation", short: "AI Prep", icon: Sparkles, description: "Classify, summarise and prepare copy for layout" },
   { href: "/create", label: "Create Like This", short: "Create", icon: WandSparkles, description: "Analyse a reference magazine and build a similar issue" },
+  { href: "/reference-studio", label: "Reference-to-Magazine Studio", short: "Ref Studio", icon: Workflow, description: "Learn a reference's design system and produce a new-topic issue in InDesign" },
   { href: "/studio", label: "Layout Studio", short: "Studio", icon: PenTool, description: "Generate and refine magazine pages" },
   { href: "/qa", label: "Quality Assurance", short: "QA", icon: ShieldCheck, description: "Browser preflight across all pages" },
   { href: "/export", label: "Export Center", short: "Export", icon: Download, description: "PDF proofs, packages and InDesign handoff" },
@@ -43,6 +45,7 @@ export const routes = {
     pageId ? `/studio?page=${pageId}${frameId ? `&frame=${frameId}` : ""}` : "/studio",
   qa: () => "/qa",
   create: () => "/create",
+  referenceStudio: (ref?: string) => (ref ? `/reference-studio?ref=${ref}` : "/reference-studio"),
   export: () => "/export",
   templates: () => "/templates",
   settings: () => "/settings",

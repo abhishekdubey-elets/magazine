@@ -18,10 +18,12 @@ const STOP = new Set(
 export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   interview: "Interview",
   "leadership-message": "Leadership message",
+  "government-perspective": "Government perspective",
   feature: "Feature article",
   "news-report": "News report",
   "case-study": "Case study",
   "event-report": "Event report",
+  "company-profile": "Company profile",
   editorial: "Editorial",
 };
 
@@ -90,6 +92,14 @@ export function classify(article: Pick<Article, "body" | "title" | "author">): C
     "news-report": (/^[A-Z]{3,}:/.test(text) ? 6 : 0) + (words < 360 ? 2 : 0) + has(/\b(announced|said|according to|on monday|on tuesday|this week)\b/g),
     feature: 2 + subheads.length * 1.2 + (words > 500 ? 2 : 0) + we * 10,
     editorial: (/(editor)/.test(designation) ? 7 : 0) + has(/dear readers|this issue|in this edition/g) * 3,
+    "government-perspective":
+      (/(secretary|minister|commissioner|ias|ips|ifs|collector|chief|director general|department|ministry|government of)/.test(designation) ? 5 : 0) +
+      has(/\b(policy|scheme|citizens|department|governance|public service|state government|ministry)\b/g) * 0.5 +
+      (qCount === 0 && firstPerson > 0.008 ? 2 : 0),
+    "company-profile":
+      has(/\b(founded|headquartered|our (clients|customers|products|services)|offers|portfolio|leadership team|ceo|managing director|turnover|revenue|offices in)\b/g) * 1.2 +
+      subheads.filter((h) => /about|overview|products|services|leadership|achievements|contact/.test(h)).length * 3 +
+      (/(ceo|founder|managing director|cto|coo)/.test(designation) ? 3 : 0),
   };
   const scores = (Object.entries(s) as [ContentType, number][])
     .map(([type, score]) => ({ type, score: Math.round(score * 10) / 10 }))

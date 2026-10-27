@@ -29,6 +29,7 @@ pipeline are deployed but switched off until their environment variables are set
 | Print-quality protection: server-stamped approvals, pre-build gates, untouched image originals, licensed-font checks, archived outputs, editor release sign-off | `e3b4c79` | Built; gates work without Adobe, builds need Adobe |
 | Server AI (Claude) with stored proposals and accept/reject log | `e3b4c79` | Built; uses built-in rules until `ANTHROPIC_API_KEY` is set |
 | Fix: Layout Studio crashed when the selected publication had no pages; screen-level error page | `a1870ca` | Done, live |
+| Reference-to-Magazine Studio: design spec with confidence and evidence, editable/confirmable design system, six format templates, new-topic issue planner, constrained generation, issue QA (blocker/warning/info), bulk corrections with undo, parent pages/layers/named styles in InDesign, pilot time report, vitest suite | — | Built and tested locally; not yet committed or deployed |
 
 **Principle kept throughout:** the browser is for preparing, proofing and approving; only Adobe
 InDesign produces print files, and nothing reaches it unless the quality gates pass.
@@ -43,7 +44,14 @@ InDesign produces print files, and nothing reaches it unless the quality gates p
 - Browser tests of first-run setup, approval in Layout Studio, edit-after-approval, Settings (fonts,
   team) and the demo mode on the live site.
 - The InDesign build script was run against a simulated InDesign (`scripts/indesign-mock.mjs`):
-  22 pages, 26 output files, no script errors.
+  22 pages, 26 output files, no script errors; and again for a studio-generated issue (20 pages,
+  6 parent pages, 4 layers, 68 paragraph styles, 24 output files, no warnings).
+- `npm test` (vitest, 41 tests): design spec, planning, generation and text preservation, issue QA,
+  bulk corrections, pilot maths, manifest structure, upload validation, content import, server rules
+  and print gates (PGlite), job release rules and the script bundle.
+- Browser run of the studio in demo mode: a synthetic 16-page reference analysed, design system
+  confirmed, 8 articles planned on 16 pages, issue generated, QA report, bulk-correction preview,
+  pilot report with a baseline; a generated page opened in Layout Studio.
 
 **Not verified yet:** a real job on Adobe's servers (typesetting, preflight presets, fonts and image
 placement inside InDesign), archiving real outputs to S3, Google sign-in against a real OAuth
@@ -105,6 +113,7 @@ Open http://localhost:3000. Other commands:
 npm run build && npm start   # production build
 npm run lint                 # ESLint
 npx tsc --noEmit             # type check
+npm test                     # vitest unit and integration tests
 ```
 
 Demo state is saved in the browser (localStorage). Use **Reset demo data** in the sidebar to start over,
@@ -141,6 +150,7 @@ pdf.js — the file is never uploaded.
 | Create Like This — page classification and style inference | Rule-based heuristics on measured data (labelled) |
 | "AI" — classification, summary, pull quotes, headlines | Claude on the server when configured (server mode); otherwise deterministic local heuristics (labelled in the UI) |
 | "AI" — image opportunities, layout recommendation, trim proposals | Deterministic local heuristics |
+| Reference-to-Magazine Studio: design spec with confidence, format templates, issue planning, generation, issue QA, bulk corrections, pilot timings | Real, in-browser; InDesign build, print gates and release need server mode |
 | Team workspace, sign-in, roles, approvals, audit trail | Real when `DATABASE_URL` is set (server mode); browser-only demo otherwise |
 | Layout generation progress | Simulated service latency around the real engine |
 | Print-ready PDF/X, `.indd`, `.idml`, Adobe preflight | Real, via the Adobe InDesign API once configured (see below) |
@@ -166,7 +176,12 @@ src/
     qa-engine.ts       Preflight checks and fixes
     ai.ts              Local heuristics standing in for AI services
     exporter.ts        PDF / PNG / JSON / handoff package generation
-    reference/         Create Like This: analyze.ts (pdf.js measurement), derive.ts (templates + issue)
+    reference/         analyze.ts (pdf.js measurement), derive.ts (templates from a page), spec.ts (design
+                       specification with confidence), formats.ts (six format templates), plan.ts (issue
+                       planner + generation), content-import.ts (text/Markdown/PDF → articles)
+    issue-qa.ts        Issue-level QA report (blocker / warning / info)
+    bulk-fixes.ts      Bulk corrections with preview and undo
+    pilot.ts           Pilot timings and time-saved report
     store.ts           Zustand store with localStorage persistence and undo/redo
     roles.ts           Team roles and permissions (shared by app and server)
     sync/              Server-mode sync engine, collections, original-image upload
@@ -189,6 +204,31 @@ drizzle/               SQL migrations
 
 Article bodies are plain text with a blank line between paragraphs. Interviews use `Q:` / `A:` prefixes;
 `## ` starts a sub-heading.
+
+## Reference-to-Magazine Studio
+
+Route `/reference-studio`. Learn the design system of an existing magazine, plan a new issue on a
+different topic, generate every page from reusable templates, check it and build it in InDesign.
+
+1. **Reference** — upload a magazine PDF (measured in the browser; scanned, mixed-size, blank and
+   unreadable files are reported).
+2. **Analysis** — every property is a finding with value, confidence, source (extracted / inferred /
+   default / confirmed) and the pages that support it; a layout per editorial format with its model page.
+3. **Design system** — review, correct and confirm the findings; the spec is versioned and saved with
+   the reference for future issues; the six format templates (interview, feature article, government
+   perspective, event report, news page, company profile) are rebuilt from it.
+4. **Issue plan** — select or import content for the new topic; the planner allocates pages from
+   measured capacity (continuation pages, news pages, reserved ads, table of contents); conflicts
+   block generation until resolved; an editor approves the plan.
+5. **Build** — pages are generated (never cutting or shrinking text), checked by the issue QA report
+   (content, layout, print, visual; blocker / warning / info), corrected in bulk with preview and
+   undo, and built in InDesign (server mode) with parent pages, layers and named styles.
+6. **Pilot** — measured timings per stage, corrections, failures, manual baseline and
+   `time saved = ((manual − automated) / manual) × 100`. A pilot passes only with real InDesign
+   output, no unresolved failures and an editor's release.
+
+Architecture, limits and the test list: [docs/reference-to-magazine.md](docs/reference-to-magazine.md).
+Run the tests with `npm test`.
 
 ## Team backend (server mode)
 

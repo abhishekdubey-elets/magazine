@@ -55,9 +55,16 @@ export interface IdParagraph {
   runs?: IdRun[];
 }
 
+/** InDesign layers the build creates (bottom to top). */
+export type IdLayerName = "Background" | "Images" | "Text" | "Furniture";
+
 interface ItemBase {
   /** Stable id (page id + frame id) — written to the InDesign script label for tracing. */
   id: string;
+  /** Object name shown in InDesign's Layers panel (defaults to the label). */
+  name?: string;
+  /** Layer the object is placed on (defaults by type: rect → Background, image → Images, text → Text). */
+  layer?: IdLayerName;
   label: string;
   bounds: Bounds;
 }
@@ -108,6 +115,18 @@ export interface IdText extends ItemBase {
   autoFit?: boolean;
   /** Report overset text in this frame as a problem. */
   reportOverset?: boolean;
+  /** Parent-page folio: the frame holds InDesign's automatic page number (styled with `paragraphs[0].style`). */
+  autoPageNumber?: boolean;
+}
+
+/** A parent (master) page pair carrying recurring furniture: running head, folio, tagline. */
+export interface IdParent {
+  id: string;
+  /** One-letter prefix, e.g. "B". */
+  prefix: string;
+  name: string;
+  left: IdItem[];
+  right: IdItem[];
 }
 
 export type IdItem = IdRect | IdImage | IdText;
@@ -119,6 +138,8 @@ export interface IdPage {
   title: string;
   /** Page background colour (drawn to the bleed). */
   background?: string;
+  /** Parent page id from `parents`; null = no parent (covers, advertisements). */
+  parent?: string | null;
   items: IdItem[];
 }
 
@@ -155,6 +176,10 @@ export interface InDesignManifestV2 {
   /** Font families and styles the document uses (for font provisioning checks). */
   fonts: { family: string; fontStyle: string }[];
   paragraphStyles: Record<string, IdParagraphStyle>;
+  /** Parent pages (recurring furniture). Pages reference them by id. */
+  parents?: IdParent[];
+  /** Layers to create, bottom to top. */
+  layers?: IdLayerName[];
   pages: IdPage[];
   stories: IdStory[];
   links: IdLink[];
@@ -171,6 +196,11 @@ export interface BuildOptions {
 /** Report written by the build script (returned in the job status). */
 export interface BuildReport {
   pages: number;
+  /** Parent pages and layers created (editable-document structure). */
+  parents?: number;
+  layers?: string[];
+  /** Named paragraph styles created. */
+  styles?: number;
   stories: number;
   overset: { id: string; label: string; page: number; characters: number }[];
   autoFitted: { id: string; label: string; page: number; scale: number }[];

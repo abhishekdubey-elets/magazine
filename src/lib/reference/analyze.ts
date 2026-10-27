@@ -374,6 +374,7 @@ function classify(p: PageWork, body: number, total: number, H: number): Pick<Ref
   const r: string[] = [];
   const res = (type: RefPageType, confidence: number) => ({ type, confidence, reasons: r, textChars, bodyChars, columns });
 
+  if (!p.lines.length && !p.images.length) return (r.push("No text and no images"), res("other", 0.9));
   if (p.number === 1) return (r.push("First page of the file"), res("cover", 0.9));
   if (contentsWord && p.number <= Math.max(8, total * 0.2)) return (r.push("Large “Contents” heading near the front"), res("contents", 0.9));
   if (p.coverage > 0.72 && bodyChars < 700) {
@@ -495,6 +496,7 @@ export async function analyzeReference(file: File, opts: AnalyzeOptions): Promis
     const hist = new ColorHistogram();
     const fontChars = new Map<string, number>();
     const work: PageWork[] = [];
+    const oddSizes: ReferenceProfile["oddSizes"] = [];
     const canvas = document.createElement("canvas");
     const ctx2d = canvas.getContext("2d", { willReadFrequently: true })!;
 
@@ -504,6 +506,9 @@ export async function analyzeReference(file: File, opts: AnalyzeOptions): Promis
       onProgress({ stage: `Measuring page ${n} of ${total} (${k + 1}/${numbers.length})`, value: 5 + (k / numbers.length) * 78 });
       const page = await doc.getPage(n);
       const pv = page.view;
+      if (n > 1 && (Math.abs(pv[2] - pv[0] - viewW) > 2 || Math.abs(pv[3] - pv[1] - viewH) > 2)) {
+        oddSizes.push({ number: n, width: round(mm(pv[2] - pv[0]), 0.5), height: round(mm(pv[3] - pv[1]), 0.5) });
+      }
       const [ops, text] = await Promise.all([page.getOperatorList(), page.getTextContent()]);
 
       // Real font names become available once the operator list has loaded them.
@@ -600,10 +605,12 @@ export async function analyzeReference(file: File, opts: AnalyzeOptions): Promis
     const colCounts: number[] = [];
     const colWidths: number[] = [];
     const gutters: number[] = [];
+    const gridPages: number[] = [];
     const m = { top: [] as number[], bottom: [] as number[], inside: [] as number[], outside: [] as number[] };
     for (const p of work) {
       const bb = p.blocks.filter((b) => isBody(b) && b.lines >= 4 && !isFurniture(b, bodySize, H));
       if (bb.reduce((n, b) => n + b.chars, 0) < 900) continue;
+      gridPages.push(p.number);
       const xs: number[] = [];
       for (const b of [...bb].sort((a, c) => a.x - c.x)) if (!xs.some((x) => Math.abs(x - b.x) < 4)) xs.push(b.x);
       colCounts.push(xs.length);
@@ -704,6 +711,9 @@ export async function analyzeReference(file: File, opts: AnalyzeOptions): Promis
 
     const notes: string[] = [];
     if (numbers.length < total) notes.push(`Sampled ${numbers.length} of ${total} pages, evenly spaced.`);
+    if (oddSizes.length) notes.push(`${oddSizes.length} page(s) have a different size from page 1 (mixed page sizes, e.g. gatefolds) and are not reproduced.`);
+    const blankPages = pages.filter((p) => p.reasons.includes("No text and no images")).map((p) => p.number);
+    if (blankPages.length) notes.push(`Blank pages: ${blankPages.join(", ")}.`);
     if (trimSource === "mediabox") notes.push("No TrimBox found — the full page box is treated as the trim size; bleed is unknown.");
     if (!hasTextLayer) notes.push("Little or no live text was found (scanned or outlined PDF). Typography and grid could not be measured; defaults are shown.");
     const rotated = work.reduce((n, p) => n + p.rotated, 0);
@@ -743,6 +753,18 @@ export async function analyzeReference(file: File, opts: AnalyzeOptions): Promis
       pages,
       previews,
       notes,
+      evidence: {
+        gridPages,
+        gutterSamples: gutters.length,
+        marginSamples: { top: m.top.length, bottom: m.bottom.length, inside: m.inside.length, outside: m.outside.length },
+        bodyBlocks: bodyBlocks.length,
+        headlineSamples: heads.length,
+        deckSamples: decks.length,
+        captionSamples: caps.length,
+        textPages: work.filter((p) => p.lines.length > 20).length,
+        blankPages,
+      },
+      oddSizes,
     };
   } finally {
     void doc.destroy();

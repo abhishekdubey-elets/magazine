@@ -223,7 +223,7 @@ function Sidebar() {
             return (
               <li key={item.href}>
                 {i === 3 && <div className="mx-2.5 my-2 border-t border-line" />}
-                {i === 8 && <div className="mx-2.5 my-2 border-t border-line" />}
+                {i === 9 && <div className="mx-2.5 my-2 border-t border-line" />}
                 <Link
                   href={item.href}
                   aria-current={active ? "page" : undefined}

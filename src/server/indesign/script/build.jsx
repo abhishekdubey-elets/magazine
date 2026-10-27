@@ -16,7 +16,8 @@
 
 /* globals app, File, Folder, MeasurementUnits, RulerOrigin, ColorModel, ColorSpace, Justification,
    Capitalization, VerticalJustification, FitOptions, CornerOptions, FontStatus, ExportFormat,
-   ExportRangeOrAllPages, JPEGOptionsQuality, PageNumberingOptions, SaveOptions, UserInteractionLevels, GradientType */
+   ExportRangeOrAllPages, JPEGOptionsQuality, PageNumberingOptions, SaveOptions, UserInteractionLevels, GradientType,
+   SpecialCharacters, NothingEnum */
 
 var PF = {
   wf: '',
@@ -24,8 +25,13 @@ var PF = {
   swatches: {},
   styles: {},
   items: {},
+  layers: {},
+  masters: {},
   report: {
     pages: 0,
+    parents: 0,
+    layers: [],
+    styles: 0,
     stories: 0,
     overset: [],
     autoFitted: [],
@@ -258,7 +264,39 @@ PF.createStyles = function (defs) {
       PF.set(ps, 'ruleBelowOffset', d.ruleBelow.offset);
     }
     PF.styles[name] = ps;
+    PF.report.styles++;
   }
+};
+
+/* ----------------------------------------------------------- layers */
+
+/** Named layers (bottom to top) so designers can lock furniture or hide images. */
+PF.createLayers = function (names) {
+  if (!names || !names.length) return;
+  var doc = PF.doc;
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i];
+    try {
+      var layer = doc.layers.itemByName(name);
+      if (!layer.isValid) layer = i === 0 ? doc.layers.item(0) : doc.layers.add({ name: name });
+      if (i === 0) { try { layer.name = name; } catch (e0) {} }
+      PF.layers[name] = layer;
+      PF.report.layers.push(name);
+    } catch (e) {
+      PF.warn('Layer ' + name + ': ' + e.message);
+    }
+  }
+};
+
+PF.props = function (item, extra) {
+  var p = { geometricBounds: item.bounds };
+  if (item.layer && PF.layers[item.layer]) p.itemLayer = PF.layers[item.layer];
+  for (var k in extra) if (extra.hasOwnProperty(k)) p[k] = extra[k];
+  return p;
+};
+
+PF.name = function (obj, item) {
+  try { obj.name = String(item.name || item.label || item.id); } catch (e) {}
 };
 
 PF.set = function (obj, prop, value) {
@@ -330,8 +368,9 @@ PF.autoFit = function (tf, item, pageNumber) {
 /* ------------------------------------------------------------ items */
 
 PF.rect = function (page, item) {
-  var r = page.rectangles.add({ geometricBounds: item.bounds });
+  var r = page.rectangles.add(PF.props(item));
   r.strokeWeight = 0;
+  PF.name(r, item);
   if (item.gradient) PF.applyGradient(r, item.gradient);
   else r.fillColor = PF.swatch(item.fill);
   if (item.stroke) {
@@ -345,9 +384,10 @@ PF.rect = function (page, item) {
 };
 
 PF.image = function (page, item, pageNumber) {
-  var r = page.rectangles.add({ geometricBounds: item.bounds });
+  var r = page.rectangles.add(PF.props(item));
   r.strokeWeight = 0;
   r.label = item.id;
+  PF.name(r, item);
   if (item.fill) r.fillColor = PF.swatch(item.fill);
   var entry = { id: item.id, page: pageNumber, link: item.link, status: 'placed' };
   if (!item.link) {
@@ -388,8 +428,9 @@ PF.focus = function (frame, fx, fy) {
 };
 
 PF.text = function (page, item, pageNumber) {
-  var tf = page.textFrames.add({ geometricBounds: item.bounds });
+  var tf = page.textFrames.add(PF.props(item));
   tf.label = item.id;
+  PF.name(tf, item);
   tf.strokeWeight = 0;
   tf.fillColor = PF.swatch(item.fill);
   PF.opacity(tf, item.opacity);
@@ -400,7 +441,12 @@ PF.text = function (page, item, pageNumber) {
   prefs.insetSpacing = item.inset || [0, 0, 0, 0];
   if (item.verticalAlign === 'center') prefs.verticalJustification = VerticalJustification.CENTER_ALIGN;
   if (item.verticalAlign === 'bottom') prefs.verticalJustification = VerticalJustification.BOTTOM_ALIGN;
-  if (item.paragraphs) {
+  if (item.autoPageNumber) {
+    // Parent-page folio: InDesign's automatic page number marker, in the folio style.
+    tf.parentStory.contents = SpecialCharacters.AUTO_PAGE_NUMBER;
+    var pnStyle = item.paragraphs && item.paragraphs[0] ? PF.styles[item.paragraphs[0].style] : null;
+    if (pnStyle) { try { tf.parentStory.paragraphs.item(0).applyParagraphStyle(pnStyle, true); } catch (epn) { PF.warn('Page number style: ' + epn.message); } }
+  } else if (item.paragraphs) {
     PF.fillParagraphs(tf.parentStory, item.paragraphs);
     if (item.autoFit) PF.autoFit(tf, item, pageNumber);
     if (item.reportOverset && tf.overflows) {
@@ -455,8 +501,14 @@ PF.build = function (manifest) {
   PF.time('documentSetup', t0);
 
   var t1 = (new Date()).getTime();
+  PF.createLayers(manifest.layers);
   PF.createStyles(manifest.paragraphStyles);
   PF.time('styles', t1);
+
+  // Parent pages carry the recurring furniture (running heads, folios, taglines).
+  var tm = (new Date()).getTime();
+  PF.createParents(manifest.parents || [], margins);
+  PF.time('parents', tm);
 
   var t2 = (new Date()).getTime();
   var p, i, item, page, pageDef;
@@ -465,6 +517,7 @@ PF.build = function (manifest) {
     page = doc.pages.item(p);
     page.marginPreferences.properties = margins;
     page.label = pageDef.pageId;
+    PF.applyParent(page, pageDef);
     if (pageDef.background) {
       var bleed = d.bleedPt;
       try {
@@ -513,6 +566,48 @@ PF.build = function (manifest) {
   PF.report.stories = manifest.stories.length;
   PF.time('stories', t3);
   return doc;
+};
+
+PF.createParents = function (parents, margins) {
+  var doc = PF.doc;
+  for (var i = 0; i < parents.length; i++) {
+    var def = parents[i];
+    try {
+      var ms = doc.masterSpreads.add();
+      try { ms.namePrefix = def.prefix; } catch (e1) {}
+      try { ms.baseName = def.name; } catch (e2) {}
+      var pages = ms.pages;
+      for (var k = 0; k < pages.length; k++) {
+        var mp = pages.item(k);
+        try { mp.marginPreferences.properties = margins; } catch (e3) {}
+        // Facing pages: the first master page is the left (verso), the second the right (recto).
+        var items = (pages.length > 1 && k === 0) ? def.left : def.right;
+        for (var j = 0; j < items.length; j++) {
+          var it = items[j];
+          try {
+            if (it.type === 'rect') PF.rect(mp, it);
+            else if (it.type === 'image') PF.image(mp, it, 0);
+            else if (it.type === 'text') PF.text(mp, it, 0);
+          } catch (ei) {
+            PF.warn('Parent ' + def.name + ' - ' + it.label + ': ' + ei.message);
+          }
+        }
+      }
+      PF.masters[def.id] = ms;
+      PF.report.parents++;
+    } catch (e) {
+      PF.warn('Parent page ' + def.name + ': ' + e.message);
+    }
+  }
+};
+
+PF.applyParent = function (page, pageDef) {
+  try {
+    if (pageDef.parent === null) page.appliedMaster = NothingEnum.NOTHING;
+    else if (pageDef.parent && PF.masters[pageDef.parent]) page.appliedMaster = PF.masters[pageDef.parent];
+  } catch (e) {
+    PF.warn('Page ' + pageDef.number + ' parent: ' + e.message);
+  }
 };
 
 PF.pageNumberOf = function (item) {

@@ -65,8 +65,12 @@ interface Actions {
   addReference: (r: ReferenceProfile) => void;
   updateReference: (id: string, patch: Partial<ReferenceProfile>) => void;
   deleteReference: (id: string) => void;
-  /** Add a publication built from a reference, with its pages and templates. */
+  /** Add (or replace) a publication built from a reference, with its pages and templates. */
   importBuild: (b: { publication: Publication; pages: Page[]; templates: Template[] }) => void;
+  updatePublication: (id: string, patch: Partial<Publication>) => void;
+  /** Replace every page of a publication (bulk corrections, undo). */
+  replacePages: (publicationId: string, pages: Page[]) => void;
+  addTemplates: (templates: Template[]) => void;
   resetDemo: () => void;
 }
 
@@ -335,16 +339,21 @@ export const useStore = create<Store>()(
         updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
         setGuide: (g) => set((s) => ({ guide: { ...s.guide, ...g } })),
 
-        addReference: (r) => set((s) => ({ references: [r, ...s.references.filter((x) => x.id !== r.id)].slice(0, 2) })),
+        // Browser storage keeps the last 2 analyses (thumbnails are large); the server keeps 10.
+        addReference: (r) => set((s) => ({ references: [r, ...s.references.filter((x) => x.id !== r.id)].slice(0, serverBacked ? 10 : 2) })),
         updateReference: (id, patch) => set((s) => ({ references: s.references.map((r) => (r.id === id ? { ...r, ...patch } : r)) })),
         deleteReference: (id) => set((s) => ({ references: s.references.filter((r) => r.id !== id) })),
         importBuild: ({ publication, pages, templates }) =>
           set((s) => ({
-            publications: [publication, ...s.publications],
-            pages: [...s.pages, ...pages],
+            publications: [publication, ...s.publications.filter((p) => p.id !== publication.id)],
+            pages: [...s.pages.filter((p) => p.publicationId !== publication.id), ...pages],
             templates: [...s.templates.filter((t) => !templates.some((n) => n.id === t.id)), ...templates],
             activePublicationId: publication.id,
           })),
+        updatePublication: (id, patch) =>
+          set((s) => ({ publications: s.publications.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: now(), updatedBy: actor } : p)) })),
+        replacePages: (publicationId, pages) => set((s) => ({ pages: [...s.pages.filter((p) => p.publicationId !== publicationId), ...pages] })),
+        addTemplates: (templates) => set((s) => ({ templates: [...s.templates.filter((t) => !templates.some((n) => n.id === t.id)), ...templates] })),
 
         resetDemo: () => {
           if (serverBacked) return;

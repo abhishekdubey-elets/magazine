@@ -218,8 +218,9 @@ export function deriveTemplate(profile: ReferenceProfile, page: RefPage, kind: R
         const shape = { x: img.x, y: top, w: img.w, h: band.y + band.h + 2.5 - top };
         frames.push({ id: "band", kind: "shape", role: "decor", label: "Name band", ...roundRect(shape), fill: profile.palette[0] ?? ink.navy, optional: true });
       }
-      frames.push({ id: "name", kind: "text", role: "author", label: "Name", ...roundRect(pad(name, 0, 0, 0, 1)), bind: "author.name", styleId: "name", style: styleFor(name, { color: light ? "#ffffff" : ink.navy, align: centred(name) || Math.abs(name.x + name.w / 2 - (img.x + img.w / 2)) < 6 ? "center" : "left" }), z: 2 });
-      if (role) frames.push({ id: "designation", kind: "text", role: "designation", label: "Designation", ...roundRect(pad(role, 0, 0, 0, role.h * 0.4)), bind: "author.role", styleId: "designation", style: styleFor(role, { color: light ? "#e8ecf4" : ink.muted, weight: 400, align: Math.abs(role.x + role.w / 2 - (img.x + img.w / 2)) < 6 ? "center" : "left" }), z: 2 });
+      // Names and designations vary in length between issues: the frames auto-fit (InDesign re-checks) and the designation gets a second line.
+      frames.push({ id: "name", kind: "text", role: "author", label: "Name", ...roundRect(pad(name, 0, 0, 0, 1)), bind: "author.name", styleId: "name", style: styleFor(name, { color: light ? "#ffffff" : ink.navy, align: centred(name) || Math.abs(name.x + name.w / 2 - (img.x + img.w / 2)) < 6 ? "center" : "left" }), autoFit: true, z: 2 });
+      if (role) frames.push({ id: "designation", kind: "text", role: "designation", label: "Designation", ...roundRect(pad(role, 0, 0, 0, Math.max(role.h * 0.4, role.size * 0.3528 * 1.3))), bind: "author.role", styleId: "designation", style: styleFor(role, { color: light ? "#e8ecf4" : ink.muted, weight: 400, align: Math.abs(role.x + role.w / 2 - (img.x + img.w / 2)) < 6 ? "center" : "left" }), autoFit: true, z: 2 });
     }
   }
 
@@ -702,7 +703,7 @@ export function buildFromReference(profile: ReferenceProfile, articles: Article[
   return { publication, pages, templates, report };
 }
 
-function tpl(id: string) {
+export function tpl(id: string) {
   const t = builtInTemplates.find((x) => x.id === id);
   if (!t) throw new Error(`Missing house template ${id}`);
   return t;
