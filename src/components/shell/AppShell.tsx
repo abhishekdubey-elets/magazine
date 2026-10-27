@@ -7,7 +7,11 @@ import {
   ChevronUp,
   Circle,
   CircleDot,
+  Cloud,
+  CloudOff,
   Compass,
+  LoaderCircle,
+  LogOut,
   MonitorSmartphone,
   RotateCcw,
   Search,
@@ -22,6 +26,8 @@ import { GUIDE_STEPS } from "@/lib/guide";
 import { useFontWatcher, useHydrated, usePublication, useQa } from "@/lib/hooks";
 import { NAV, navFor } from "@/lib/nav";
 import { useStore } from "@/lib/store";
+import { ROLE_LABEL } from "@/lib/roles";
+import { bootWorkspace, seedWorkspace, signOut, useWorkspace } from "@/lib/sync/engine";
 import { Badge, Button, cn, Modal, TipProvider } from "../ui";
 import { useInDesignPolling } from "../export/InDesignPanel";
 import { FixHost } from "../qa/FixHost";
@@ -32,13 +38,37 @@ export const useVisited = create<{ visited: string[] }>(() => ({ visited: [] }))
 
 export function AppShell({ children }: { children: ReactNode }) {
   const hydrated = useHydrated();
+  const status = useWorkspace((s) => s.status);
   const pathname = usePathname();
   useFontWatcher();
   useInDesignPolling();
 
   useEffect(() => {
+    if (pathname !== "/login") void bootWorkspace();
+  }, [pathname]);
+
+  useEffect(() => {
     useVisited.setState((s) => (s.visited.includes(pathname) ? s : { visited: [...s.visited, pathname] }));
   }, [pathname]);
+
+  // Conflicts and rejected edits from the sync engine.
+  useEffect(() => {
+    let last = 0;
+    return useWorkspace.subscribe((s) => {
+      for (const n of s.notices) if (n.id > last) toast(n.tone === "error" ? "error" : n.tone === "warning" ? "warning" : "info", n.title, n.description);
+      last = s.notices.at(-1)?.id ?? last;
+    });
+  }, []);
+
+  if (pathname === "/login") {
+    return (
+      <TipProvider>
+        {children}
+        <Toaster />
+      </TipProvider>
+    );
+  }
+  if (status === "empty" || status === "error") return <WorkspaceGate />;
 
   if (pathname.startsWith("/proof")) {
     return (
@@ -65,6 +95,89 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
+/** Server mode: first run (empty workspace) or a load error. */
+function WorkspaceGate() {
+  const { status, user, error } = useWorkspace();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const admin = user?.role === "admin";
+  return (
+    <div className="grid min-h-screen place-items-center bg-canvas p-6">
+      <div className="w-full max-w-[460px] rounded-xl border border-line bg-white p-6 shadow-card">
+        {status === "error" ? (
+          <>
+            <h1 className="text-[17px] font-semibold text-ink">Could not load the workspace</h1>
+            <p className="mt-2 text-[13px] text-ink-2">{error}</p>
+            <Button className="mt-4" onClick={() => location.reload()}>
+              Try again
+            </Button>
+          </>
+        ) : (
+          <>
+            <h1 className="text-[17px] font-semibold text-ink">Set up the PressFlow workspace</h1>
+            <p className="mt-2 text-[13px] text-ink-2">
+              {admin
+                ? "The server database is empty. Start with the sample issue and the built-in templates; you can then build your own issues from them or with Create Like This."
+                : "The server database is empty. An admin needs to set it up first."}
+            </p>
+            {err && <p className="mt-3 rounded-md bg-err-50 px-3 py-2 text-[12.5px] text-err">{err}</p>}
+            {admin && (
+              <Button
+                className="mt-4"
+                loading={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setErr(null);
+                  try {
+                    await seedWorkspace();
+                  } catch (e) {
+                    setErr(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Set up with the sample issue
+              </Button>
+            )}
+          </>
+        )}
+        <p className="mt-5 border-t border-line pt-3 text-[12px] text-muted">
+          Signed in as {user?.email ?? "-"} ·{" "}
+          <button className="underline" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SyncStatus() {
+  const { sync, org } = useWorkspace();
+  const bad = sync.state === "offline" || sync.state === "error";
+  const Icon = sync.state === "saving" ? LoaderCircle : bad ? CloudOff : Cloud;
+  const label =
+    sync.state === "saving"
+      ? "Saving…"
+      : sync.state === "offline"
+        ? "Offline — edits are saved when you reconnect"
+        : sync.state === "error"
+          ? `Not saved: ${sync.message ?? "server error"}`
+          : "All changes saved";
+  return (
+    <div className="flex items-center gap-2 rounded-md bg-canvas px-2.5 py-2" role="status" aria-live="polite">
+      <Icon className={cn("size-4 shrink-0", sync.state === "saving" && "animate-spin", bad ? "text-err" : "text-muted")} />
+      <div className="min-w-0 text-[11.5px] leading-tight">
+        <p className="truncate font-semibold text-ink-2">{org?.name ?? "Team workspace"}</p>
+        <p className={cn("truncate", bad ? "text-err" : "text-muted")} title={label}>
+          {label}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function LoadingSkeleton() {
   return (
     <div className="space-y-4 p-8" aria-busy="true" aria-label="Loading workspace">
@@ -85,6 +198,7 @@ function Sidebar() {
   const [confirmReset, setConfirmReset] = useState(false);
   const resetDemo = useStore((s) => s.resetDemo);
   const router = useRouter();
+  const serverMode = useWorkspace((s) => s.setup?.mode === "server");
   return (
     <aside className="flex w-[244px] shrink-0 flex-col border-r border-line bg-white max-lg:w-[68px]">
       <Link href="/" className="flex h-14 items-center gap-2.5 border-b border-line px-4">
@@ -129,6 +243,11 @@ function Sidebar() {
         </ul>
       </nav>
 
+      {serverMode ? (
+        <div className="border-t border-line p-3 max-lg:hidden">
+          <SyncStatus />
+        </div>
+      ) : (
       <div className="space-y-2 border-t border-line p-3 max-lg:hidden">
         <div className="flex items-center gap-2 rounded-md bg-canvas px-2.5 py-2">
           <MonitorSmartphone className="size-4 text-muted" />
@@ -144,6 +263,7 @@ function Sidebar() {
           <RotateCcw className="size-3.5" /> Reset demo data
         </button>
       </div>
+      )}
       <Modal
         open={confirmReset}
         onOpenChange={setConfirmReset}
@@ -193,11 +313,12 @@ function Topbar() {
   const nav = navFor(pathname);
   const setGuide = useStore((s) => s.setGuide);
   const guideOpen = useStore((s) => s.guide.open);
+  const user = useWorkspace((s) => s.user);
   const [q, setQ] = useState("");
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-white px-5">
       <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px]">
-        <span className="truncate text-muted max-md:hidden">{hydrated ? `${pub.title} — ${pub.issueLabel}` : "Tech Maha Impact — May 2026"}</span>
+        <span className="truncate text-muted max-md:hidden">{hydrated && pub ? `${pub.title} — ${pub.issueLabel}` : "Loading…"}</span>
         <ChevronRight className="size-3.5 shrink-0 text-faint max-md:hidden" />
         <span className="truncate font-semibold text-ink">{nav?.label ?? "Workspace"}</span>
       </nav>
@@ -225,11 +346,21 @@ function Topbar() {
         <Compass /> Guided demo
       </Button>
       <div className="flex items-center gap-2.5 border-l border-line pl-4">
-        <span className="grid size-8 place-items-center rounded-full bg-[#e8edf8] text-[12px] font-semibold text-brand">SK</span>
+        {user?.picture ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={user.picture} alt="" referrerPolicy="no-referrer" className="size-8 rounded-full" />
+        ) : (
+          <span className="grid size-8 place-items-center rounded-full bg-[#e8edf8] text-[12px] font-semibold text-brand">{initials(user?.name ?? DEMO_USER)}</span>
+        )}
         <span className="leading-tight max-xl:hidden">
-          <span className="block text-[12.5px] font-semibold text-ink">{DEMO_USER}</span>
-          <span className="block text-[11px] text-muted">{DEMO_USER_ROLE}</span>
+          <span className="block text-[12.5px] font-semibold text-ink">{user?.name ?? DEMO_USER}</span>
+          <span className="block text-[11px] text-muted">{user ? ROLE_LABEL[user.role] : DEMO_USER_ROLE}</span>
         </span>
+        {user && (
+          <button className="rounded p-1.5 text-muted hover:bg-canvas hover:text-ink" aria-label="Sign out" title="Sign out" onClick={() => void signOut()}>
+            <LogOut className="size-4" />
+          </button>
+        )}
       </div>
     </header>
   );
@@ -305,3 +436,11 @@ function GuidePanel() {
     </div>
   );
 }
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join("");

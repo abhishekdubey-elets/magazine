@@ -27,7 +27,7 @@ export function imageSrc(asset: ImageAsset | undefined): string {
   return asset.source === "sample" ? getSampleImageSrc(asset.id) : asset.src ?? "";
 }
 
-/** Effective resolution of an image placed in a frame (pixels per inch at print size). */
+/** Effective resolution of an image placed in a frame (pixels per inch at print size). Uses the original's pixels when known. */
 export function effectivePpi(asset: ImageAsset, frameW: number, frameH: number, fit: "cover" | "contain"): number {
   if (asset.vector) return Infinity;
   const frameAspect = frameW / frameH;
@@ -88,6 +88,7 @@ export async function fileToAsset(file: File, compress: boolean, maxPx = 1800): 
 /** File name used for an image inside export packages. */
 export function linkName(asset: ImageAsset) {
   if (asset.source === "sample") return `links/${asset.id}.svg`;
+  if (asset.original) return `links/${asset.id}.${asset.original.ext}`;
   const ext = asset.src?.startsWith("data:image/png") ? "png" : asset.src?.startsWith("data:image/svg") ? "svg" : asset.src?.startsWith("data:image/webp") ? "webp" : "jpg";
   return `links/${asset.id}.${ext}`;
 }

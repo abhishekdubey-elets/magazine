@@ -197,4 +197,41 @@ export interface JobView {
   outputs: JobOutput[];
   report?: BuildReport;
   errors: string[];
+  /** Server mode: the build kind, the pre-build gates and the print-release state. */
+  kind?: "print" | "documents";
+  gates?: GateResult;
+  release?: ReleaseInfo;
+  /** Outputs are archived in the workspace's storage (links do not expire after 24 h). */
+  archived?: boolean;
+}
+
+/* ------------------------------------------------------ print quality */
+
+export type GateStatus = "pass" | "warn" | "block";
+
+export interface GateCheck {
+  id: string;
+  label: string;
+  status: GateStatus;
+  detail: string;
+  items?: string[];
+}
+
+/** Checks run on the server before a build; a print build is refused while any check blocks. */
+export interface GateResult {
+  kind: "print" | "documents";
+  ok: boolean;
+  checks: GateCheck[];
+  checkedAt: string;
+}
+
+export interface ReleaseInfo {
+  /** none: not a print candidate · pending: awaiting an editor · released · rejected */
+  status: "none" | "pending" | "released" | "rejected";
+  /** The InDesign report proves the files are clean (no overset, no missing fonts or images, preflight 0 errors). */
+  eligible: boolean;
+  reasons: string[];
+  by?: string | null;
+  at?: string | null;
+  note?: string | null;
 }

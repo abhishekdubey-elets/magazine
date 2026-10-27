@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
-  const denied = guard(req);
+  const denied = await guard(req);
   if (denied) return denied;
   try {
     return NextResponse.json(await testConnection());

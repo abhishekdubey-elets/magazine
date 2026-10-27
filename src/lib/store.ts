@@ -73,6 +73,17 @@ interface Actions {
 export type Store = DemoState & Actions;
 
 const now = () => new Date().toISOString();
+
+/** Name recorded on activity and edits: the signed-in person in server mode. */
+let actor = DEMO_USER;
+export const setActor = (name: string) => {
+  actor = name;
+};
+/** Server mode: the workspace belongs to the team, so "reset demo" is disabled. */
+let serverBacked = false;
+export const setServerBacked = (v: boolean) => {
+  serverBacked = v;
+};
 const uid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`;
 
 export const initialState = (): DemoState => ({
@@ -196,7 +207,7 @@ export const useStore = create<Store>()(
         set((s) => ({
           pages: s.pages.map((p) => (p.id === id ? next : p)),
           publications: s.publications.map((pub) =>
-            pub.id === page.publicationId ? { ...pub, updatedAt: next.updatedAt, updatedBy: DEMO_USER } : pub,
+            pub.id === page.publicationId ? { ...pub, updatedAt: next.updatedAt, updatedBy: actor } : pub,
           ),
         }));
       };
@@ -295,7 +306,7 @@ export const useStore = create<Store>()(
 
         log: (e) =>
           set((s) => ({
-            activity: [{ id: uid("act"), at: now(), actor: e.actor ?? DEMO_USER, ...e }, ...s.activity].slice(0, 80),
+            activity: [{ id: uid("act"), at: now(), actor: e.actor ?? actor, ...e }, ...s.activity].slice(0, 80),
           })),
 
         addExportJob: (job) => set((s) => ({ exportJobs: [job, ...s.exportJobs].slice(0, 40) })),
@@ -336,6 +347,7 @@ export const useStore = create<Store>()(
           })),
 
         resetDemo: () => {
+          if (serverBacked) return;
           useHistory.setState({ past: {}, future: {} });
           set({ ...initialState() });
         },
@@ -346,6 +358,8 @@ export const useStore = create<Store>()(
       version: 10,
       storage: createJSONStorage(() => safeStorage),
       migrate: () => initialState(),
+      // Hydrated by the workspace bootstrap: from this browser in demo mode, from the server otherwise.
+      skipHydration: true,
     },
   ),
 );

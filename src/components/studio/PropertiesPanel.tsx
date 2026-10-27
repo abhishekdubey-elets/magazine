@@ -11,6 +11,7 @@ import { fontDisplayNames } from "@/lib/fonts";
 import { effectivePpi, findImage, imageSrc } from "@/lib/images";
 import { overrideKey, storyPages, type ResolvedPage } from "@/lib/layout-engine";
 import { routes } from "@/lib/nav";
+import { useCan } from "@/lib/sync/engine";
 import { useStore } from "@/lib/store";
 import { countWords } from "@/lib/text-engine";
 import type { FontRole, PageStatus, PageType, ResolvedElement, TextStyle } from "@/lib/types";
@@ -288,6 +289,7 @@ export function ElementProperties({ r, el, onDeselect }: { r: ResolvedPage; el: 
 
 export function PageProperties({ r, onGenerate }: { r: ResolvedPage; onGenerate: () => void }) {
   const s = useStore();
+  const canApprove = useCan("approve-pages");
   const { page, article, template } = r;
   const recs = article ? recommendTemplates(article, s.templates, s.settings, s.publications.find((p) => p.id === page.publicationId)?.trim).slice(0, 3) : [];
   return (
@@ -334,9 +336,18 @@ export function PageProperties({ r, onGenerate }: { r: ResolvedPage; onGenerate:
               </option>
               <option value="draft">Draft</option>
               <option value="in-review">In review</option>
-              <option value="approved">Approved</option>
+              <option value="approved" disabled={!canApprove && page.status !== "approved"}>
+                Approved{canApprove ? "" : " (editors only)"}
+              </option>
             </Select>
           </Field>
+          {page.status === "approved" && page.approvedBy && (
+            <p className="text-[11.5px] text-muted">
+              Approved by {page.approvedBy}
+              {page.approvedAt ? ` · ${new Date(page.approvedAt).toLocaleString()}` : ""}. Any change sends it back to review.
+            </p>
+          )}
+          {page.status !== "approved" && page.reviewNote && <p className="rounded bg-warn-50 px-2 py-1.5 text-[11.5px] text-warn">{page.reviewNote}</p>}
           {article && (
             <Link href={routes.prepare(article.id)} className="inline-flex items-center gap-1 text-[12px] font-medium text-brand hover:underline">
               <Link2 className="size-3" /> Open “{article.title}” in AI Preparation

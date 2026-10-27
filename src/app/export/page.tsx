@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { EmptyState, fmtBytes, fmtDateTime, PageHeader } from "@/components/common";
-import { InDesignJobCard } from "@/components/export/InDesignPanel";
+import { GatesSummary, InDesignJobCard } from "@/components/export/InDesignPanel";
 import { PageRenderer } from "@/components/page/PageRenderer";
 import { toast } from "@/components/shell/toast";
 import { Badge, Button, Card, CardHeader, cn, Field, Input, Progress, Segmented, Switch } from "@/components/ui";
@@ -13,8 +13,10 @@ import { buildContentPackage, buildHandoffZip, buildPdf, buildPngZip, capturePag
 import { useQa } from "@/lib/hooks";
 import { resolvePage } from "@/lib/layout-engine";
 import { useStore } from "@/lib/store";
+import type { GateResult } from "@/lib/indesign/manifest-types";
+import { useWorkspace } from "@/lib/sync/engine";
 import type { ExportFormat, ExportJob, ExportSettings } from "@/lib/types";
-import { fetchReadiness, integrationState, startInDesignJob, type ServerReadiness } from "@/services/indesign";
+import { checkPrintGates, fetchReadiness, GateError, integrationState, startInDesignJob, type ServerReadiness } from "@/services/indesign";
 
 interface FormatDef {
   id: ExportFormat;
@@ -80,6 +82,9 @@ function ExportCenter() {
   const [renderPages, setRenderPages] = useState<number[]>([]);
   const [last, setLast] = useState<{ blob: Blob; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [gates, setGates] = useState<GateResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const serverMode = useWorkspace((s) => s.setup?.mode === "server");
   const hostRef = useRef<HTMLDivElement>(null);
 
   let selected: number[] = [];
@@ -178,10 +183,23 @@ function ExportCenter() {
     }
   };
 
+  const checkGates = async () => {
+    setChecking(true);
+    setError(null);
+    try {
+      setGates(await checkPrintGates(ctx, uploads, selected, settings, cfg.format === "pdf-print" ? "print" : "documents"));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChecking(false);
+    }
+  };
+
   const runInDesign = async () => {
     const name = `${base}-${rangeLabel}${cfg.format === "pdf-print" ? "-print" : "-indesign"}`;
     const id = `exp-${Date.now()}`;
     setProgress({ label: "Preparing the InDesign job…", value: 10 });
+    setGates(null);
     try {
       const outputs = cfg.format === "pdf-print" ? { pdf: true, indd: false, idml: false, jpeg: true } : { pdf: true, indd: true, idml: true, jpeg: true };
       const res = await startInDesignJob(ctx, uploads, selected, settings, outputs, (label) => setProgress({ label, value: 40 }));
@@ -195,12 +213,21 @@ function ExportCenter() {
         createdAt: new Date().toISOString(),
         qa: { errors: errs.length, warnings: warns.length },
         settings: cfg,
-        indesign: { jobId: res.jobId, stage: "Queued at Adobe", outputs: [] },
+        indesign: { jobId: res.jobId, stage: "Queued at Adobe", outputs: [], kind: res.job?.kind, gates: res.gates, archived: res.job?.archived },
       });
+      if (res.gates) setGates(res.gates);
       log({ kind: "export", message: `InDesign build started — ${res.pages} pages, ${res.links} images, ${res.fonts} font files`, actor: "Adobe InDesign API" });
       toast("info", "InDesign build started", "Adobe InDesign is building the pages. Results appear here when it finishes.");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (e instanceof GateError) {
+        setGates(e.gates);
+        const n = e.gates.checks.filter((c) => c.status === "block").length;
+        setError(`${n} print quality check${n === 1 ? "" : "s"} failed — nothing was sent to InDesign. See the checks below.`);
+        record("blocked", name, undefined, undefined, msg);
+        toast("warning", "Print build blocked", "Fix the blocking checks, then build again.");
+        return;
+      }
       setError(`Could not start the InDesign build: ${msg}`);
       record("failed", name, undefined, undefined, msg);
       toast("error", "InDesign build not started", msg);
@@ -242,7 +269,7 @@ function ExportCenter() {
                   <span className="min-w-0">
                     <span className={cn("block text-[13px] font-semibold", f.available ? "text-ink" : "text-muted")}>{f.label}</span>
                     <span className="block text-[12px] leading-snug text-muted">{f.description}</span>
-                    {f.note && <Badge tone="neutral" className="mt-1.5">{f.note}</Badge>}
+                    {f.note && <p className="mt-1.5 rounded bg-canvas px-2 py-1 text-[11.5px] leading-snug break-words text-muted">{f.note}</p>}
                   </span>
                 </button>
               ))}
@@ -295,7 +322,7 @@ function ExportCenter() {
           ))}
 
           <Card>
-            <CardHeader title="Export history" description="Recorded in this browser" />
+            <CardHeader title="Export history" description={serverMode ? "Shared with the team" : "Recorded in this browser"} />
             {jobs.length === 0 ? (
               <EmptyState title="No exports yet" />
             ) : (
@@ -368,6 +395,16 @@ function ExportCenter() {
                         Download again
                       </button>
                     </div>
+                  )}
+                  {serverMode && isInDesign && gates && (
+                    <div className="mb-3">
+                      <GatesSummary gates={gates} />
+                    </div>
+                  )}
+                  {serverMode && isInDesign && fmt.available && (
+                    <Button variant="secondary" className="mb-2 w-full" loading={checking} disabled={!!rangeError} onClick={() => void checkGates()}>
+                      <ShieldAlert /> Check print readiness
+                    </Button>
                   )}
                   <Button variant="primary" size="lg" className="w-full" disabled={!!rangeError || !fmt.available} onClick={run}>
                     {cfg.format === "indesign-handoff" || cfg.format === "png-pages" ? <FileArchive /> : <Download />} Export {fmt.label.toLowerCase()}

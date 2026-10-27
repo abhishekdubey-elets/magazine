@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Allows a production build alongside a running dev server (NEXT_DIST_DIR=.next-build).
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  // Native / WASM server packages load from node_modules at runtime.
+  serverExternalPackages: ["@electric-sql/pglite", "sharp", "fontkit", "postgres"],
   webpack: (config) => {
     // pdf.js references the optional Node "canvas" package; it is never used in the browser.
     config.resolve.alias = { ...config.resolve.alias, canvas: false };

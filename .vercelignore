@@ -3,3 +3,4 @@ node_modules
 .next-build
 tsconfig.tsbuildinfo
 public/pdf.worker.min.mjs
+.data

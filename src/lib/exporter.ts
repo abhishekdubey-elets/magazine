@@ -140,7 +140,12 @@ export async function buildHandoffZip(ctx: LayoutContext, uploads: ImageAsset[],
     const asset = findImage(link.assetId, uploads);
     if (!asset) continue;
     if (asset.source === "sample") zip.file(link.path, renderSampleSvg(asset.id));
-    else if (asset.src) zip.file(link.path, dataUrlToBytes(asset.src));
+    else if (asset.original) {
+      // Server mode: package the untouched original, never the screen preview.
+      const res = await fetch(`/api/assets/${asset.id}/original`);
+      if (!res.ok) throw new Error(`Could not download the original of ${asset.name} (${res.status}).`);
+      zip.file(link.path, new Uint8Array(await res.arrayBuffer()));
+    } else if (asset.src?.startsWith("data:")) zip.file(link.path, dataUrlToBytes(asset.src));
   }
   zip.file(
     "README.md",

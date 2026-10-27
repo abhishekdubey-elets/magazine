@@ -95,6 +95,74 @@ src/
 Article bodies are plain text with a blank line between paragraphs. Interviews use `Q:` / `A:` prefixes;
 `## ` starts a sub-heading.
 
+## Team backend (server mode)
+
+Set `DATABASE_URL` and PressFlow switches from the single-browser demo to a shared team workspace.
+Without it, everything keeps working as the browser demo.
+
+**What the server adds**
+
+- **Sign-in** with Google Workspace (OpenID Connect + PKCE). Only verified addresses on
+  `AUTH_ALLOWED_DOMAINS` (and the Workspace `hd` claim) get in. `ADMIN_EMAILS` are always admins.
+- **Roles, enforced on the server:** admin, editor, designer, contributor, viewer
+  (`src/lib/roles.ts`). Only editors approve articles and pages and release issues to print.
+- **Shared workspace** in Postgres (`src/server/db/schema.ts`). The app keeps working on its local
+  copy; edits are pushed with the version they started from, so a stale edit is refused rather than
+  overwriting a colleague (`src/lib/sync/engine.ts`, `src/server/workspace/sync.ts`). Teammates'
+  changes are pulled every few seconds.
+- **Audit trail** and article history: sign-ins, approvals, reopenings, releases, role changes,
+  uploads (Settings → Team & roles).
+- **Original images:** uploads go straight to storage untouched (no resizing or recompression). The
+  server measures pixel size, colour space, ICC profile, EXIF rotation and a SHA-256 itself; the app
+  only shows a preview. InDesign places the original.
+- **Licensed fonts** (Settings → Licensed fonts): parsed with the names InDesign sees, including
+  variable-font instances.
+- **Server AI** (AI Content Preparation): Claude (`claude-opus-5-5`) when `ANTHROPIC_API_KEY` is set,
+  otherwise the built-in rules. Every result is a stored proposal with the accept/reject decision
+  logged; pull quotes must appear in the article word-for-word or they are dropped.
+
+**Print-quality guarantees**
+
+1. *What was approved is what prints.* Approval is stamped by the server with a fingerprint of the
+   page, its article and its template. Any later change to the page sends it back to review; a
+   change to the article or template blocks printing until it is approved again.
+2. *Gates before a print build* (Export Center → **Check print readiness**, and again on submit;
+   `src/server/print/gates.ts`), checked against the server's records:
+   every page approved and unchanged · no blank pages · every font style present in the licensed
+   library (no substitution) · originals for every image · effective resolution at placed size
+   (blocks below `PRINT_MIN_PPI`, default 200; flags below `PRINT_TARGET_PPI`, default 300) · empty
+   required image frames · bleed ≥ 3 mm · PDF/X preset. A blocked print build is never sent to Adobe.
+   *Documents* builds (INDD/IDML) show the same findings as advice.
+3. *Release sign-off.* When InDesign finishes, outputs are archived in your bucket (Adobe deletes
+   them after 24 h). A print build is releasable only if InDesign reports no overset text, no
+   missing fonts or images and zero preflight errors; an editor then releases or rejects it with a
+   note.
+
+**Setup**
+
+1. Postgres (Neon, Supabase, RDS…): set `DATABASE_URL`. `vercel-build` runs the migrations
+   (`npm run db:migrate`) before building.
+2. Google Cloud → OAuth client (Web): redirect URI `https://<your-domain>/api/auth/callback/google`.
+   Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_ALLOWED_DOMAINS`, `ADMIN_EMAILS`,
+   `AUTH_SECRET` (32+ random characters) and `APP_URL`.
+3. S3 bucket (the same one the InDesign pipeline uses). Add a CORS rule so the browser can upload
+   originals and fonts directly and download originals:
+   `[{"AllowedOrigins":["https://<your-domain>"],"AllowedMethods":["GET","PUT"],"AllowedHeaders":["content-type"],"MaxAgeSeconds":3600}]`
+4. Optional: `ANTHROPIC_API_KEY` for AI suggestions, `CRON_SECRET` for the daily fallback that
+   archives builds nobody was watching (`vercel.json`).
+5. Sign in as an admin, click **Set up with the sample issue**, upload the licensed fonts, invite
+   the team (they appear after their first sign-in) and set roles.
+
+**Local development** without Docker or Google:
+
+```bash
+DATABASE_URL=pglite://.data/pglite AUTH_SECRET=change-me-to-32-or-more-characters AUTH_DEV_LOGIN=1 AUTH_ALLOWED_DOMAINS=elets.in ADMIN_EMAILS=you@elets.in npm run dev
+```
+
+PGlite (embedded Postgres) stores the database in `.data/`, files go to `.data/storage`, and the
+sign-in page offers a password-less development login (localhost only, never on Vercel) with a role
+picker. InDesign builds still need S3 and Adobe credentials.
+
 ## Print production with the Adobe InDesign API
 
 Print-ready output is built by **Adobe InDesign in the cloud** (Firefly Services InDesign API), fully

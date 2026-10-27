@@ -74,7 +74,7 @@ export async function ensureScript(): Promise<string> {
 
 /* -------------------------------------------------------------- assets */
 
-const UPLOAD_NAME = /^img-up-[a-z0-9]+\.(jpg|jpeg|png|webp|svg)$/;
+const UPLOAD_NAME = /^img-up-[a-z0-9]+\.(jpg|jpeg|png|webp|svg|tif)$/;
 const SAMPLE_NAME = /^img-[a-z0-9-]+\.svg$/;
 const MAX_UPLOAD = 15 * 1024 * 1024;
 
@@ -119,7 +119,12 @@ function validate(m: unknown): asserts m is InDesignManifestV2 {
   if (!x.document || !x.paragraphStyles || !Array.isArray(x.stories) || !Array.isArray(x.links)) throw new PipelineError("The manifest is incomplete.");
 }
 
-export async function submitJob(manifest: unknown, options: Partial<BuildOptions> = {}) {
+export interface SubmitContext {
+  /** Server mode: storage key of an uploaded image's untouched original (null = not available). */
+  resolveUpload?: (assetId: string) => string | null;
+}
+
+export async function submitJob(manifest: unknown, options: Partial<BuildOptions> = {}, ctx: SubmitContext = {}) {
   validate(manifest);
   const opts: BuildOptions = { ...DEFAULT_OPTIONS, ...options, outputs: { ...DEFAULT_OPTIONS.outputs, ...options.outputs } };
   const executionUrl = await ensureScript();
@@ -131,6 +136,15 @@ export async function submitJob(manifest: unknown, options: Partial<BuildOptions
   // Images referenced by the pages.
   const missing: string[] = [];
   for (const link of manifest.links) {
+    if (ctx.resolveUpload && link.source === "upload") {
+      const original = ctx.resolveUpload(link.assetId);
+      if (!original || !(await store.exists(original))) {
+        missing.push(link.path);
+        continue;
+      }
+      assets.push({ source: { url: await store.signedGet(original) }, destination: link.path });
+      continue;
+    }
     const k = assetKey(link.path, link.source);
     if (!(await store.exists(k))) {
       if (link.source === "sample") {

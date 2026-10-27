@@ -1,4 +1,4 @@
-import type { BuildReport, JobOutput } from "./indesign/manifest-types";
+import type { BuildReport, GateResult, JobOutput, ReleaseInfo } from "./indesign/manifest-types";
 
 /**
  * Central data model for Elets PressFlow AI.
@@ -67,6 +67,9 @@ export interface Article {
   updatedAt: string;
   /** Free-text editorial note shown in the library. */
   note?: string;
+  /** Set by the server when an editor approves (server mode). */
+  approvedAt?: string;
+  approvedBy?: string;
 }
 
 export type ImageSubject = "portrait" | "scene" | "abstract" | "event" | "data" | "advertisement" | "cover";
@@ -86,6 +89,31 @@ export interface ImageAsset {
   alt: string;
   credit?: string;
   createdAt: string;
+  /** Server mode: the untouched original file (what InDesign places) as measured by the server. */
+  original?: OriginalImage;
+}
+
+export interface OriginalImage {
+  /** Storage key (assets/originals/<id>.<ext>). */
+  key: string;
+  ext: string;
+  bytes: number;
+  format: string;
+  /** Pixel size of the original (before any EXIF rotation). */
+  width: number;
+  height: number;
+  /** srgb, cmyk, b-w, rgb16, … (libvips interpretation). */
+  colorSpace: string;
+  channels: number;
+  bitDepth?: string;
+  /** Embedded ICC profile description, if any. */
+  iccProfile?: string;
+  /** Resolution stored in the file (informational; effective PPI depends on placed size). */
+  dpi?: number;
+  /** EXIF orientation (1 = upright). InDesign may place the raw pixels unrotated. */
+  orientation?: number;
+  hasAlpha?: boolean;
+  sha256: string;
 }
 
 /* --------------------------------------------------------------- Publication */
@@ -327,7 +355,13 @@ export interface Page {
   imageOverrides: Record<string, ID | null>;
   frameOverrides: Record<string, FrameOverride>;
   generatedAt?: string;
+  /** Set by the server when an editor approves (server mode). */
   approvedAt?: string;
+  approvedBy?: string;
+  /** Fingerprints of the page, article and template at approval (server-set; checked before print). */
+  approvedRefs?: { page: string | null; article: string | null; template: string | null };
+  /** Why the page needs approval again (e.g. edited after approval). */
+  reviewNote?: string;
   updatedAt: string;
 }
 
@@ -476,9 +510,14 @@ export interface ExportJob {
     stage?: string;
     outputs: JobOutput[];
     report?: BuildReport;
-    /** Download links expire about 24 hours after the job finishes. */
+    /** Download links expire about 24 hours after the job finishes (demo mode; server mode archives them). */
     expiresAt?: string;
     errors?: string[];
+    /** Server mode */
+    kind?: "print" | "documents";
+    gates?: GateResult;
+    release?: ReleaseInfo;
+    archived?: boolean;
   };
 }
 

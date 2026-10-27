@@ -6,6 +6,7 @@ import { useState } from "react";
 import { CONTENT_TYPE_LABELS } from "@/lib/ai";
 import { imageSrc } from "@/lib/images";
 import { newId, useStore } from "@/lib/store";
+import { useCan } from "@/lib/sync/engine";
 import { countWords } from "@/lib/text-engine";
 import type { ApprovalStatus, Article, ContentType } from "@/lib/types";
 import { ImagePicker, UploadButton, useAllImages } from "../common";
@@ -37,6 +38,7 @@ export function ContentEditor({ open, onOpenChange, article, onSaved }: { open: 
   const [picker, setPicker] = useState(false);
   const [tags, setTags] = useState(a.tags.join(", "));
   const images = useAllImages();
+  const canApprove = useCan("approve-articles");
   const set = (patch: Partial<Article>) => setA((x) => ({ ...x, ...patch }));
   const setAuthor = (patch: Partial<Article["author"]>) => setA((x) => ({ ...x, author: { ...x.author, ...patch } }));
   const words = countWords(a.body);
@@ -118,7 +120,9 @@ export function ContentEditor({ open, onOpenChange, article, onSaved }: { open: 
             <option value="draft">Draft</option>
             <option value="in-review">In review</option>
             <option value="needs-changes">Needs changes</option>
-            <option value="approved">Approved</option>
+            <option value="approved" disabled={!canApprove && a.status !== "approved"}>
+              Approved{canApprove ? "" : " (editors only)"}
+            </option>
           </Select>
         </Field>
         <Field label={a.contentType === "interview" ? "Interviewee *" : "Author *"} htmlFor="ce-author" className="col-span-2">

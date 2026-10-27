@@ -47,6 +47,8 @@ import { routes } from "@/lib/nav";
 import { newId, useStore } from "@/lib/store";
 import { countWords } from "@/lib/text-engine";
 import type { Article, ContentType, Page } from "@/lib/types";
+import { isServerMode } from "@/lib/sync/engine";
+import { decideOnServer, proposeOnServer, type ServerAiAction } from "@/services/ai";
 
 type Action = "classify" | "summary" | "quotes" | "headlines" | "images" | "prepare";
 
@@ -119,6 +121,8 @@ function Workspace({ article }: { article: Article }) {
   const pages = useStore((s) => s.pages);
   const uploads = useStore((s) => s.uploads);
   const [results, setResults] = useState<Results>({});
+  /** Server mode: id of the stored proposal per action (for the accept/reject record). */
+  const [proposalIds, setProposalIds] = useState<Partial<Record<keyof Results, string>>>({});
   const [running, setRunning] = useState<Set<Action>>(new Set());
   const [sendOpen, setSendOpen] = useState(false);
   const [quoteSel, setQuoteSel] = useState<Set<number>>(new Set());
@@ -130,9 +134,28 @@ function Workspace({ article }: { article: Article }) {
   const rec = useMemo(() => recommendTemplates(article, templates, settings, trim)[0], [article, templates, settings, trim]);
   const cls = useMemo(() => classify(article), [article]);
 
+  const viaServer = async (a: ServerAiAction): Promise<Results> => {
+    const r = await proposeOnServer(a, article.id);
+    setProposalIds((p) => ({ ...p, [a]: r.id }));
+    if (r.rejected.length) toast("info", `${r.rejected.length} suggestion${r.rejected.length > 1 ? "s" : ""} dropped`, r.rejected[0]);
+    const o = r.output as Record<string, unknown>;
+    if (a === "classify") return { classify: o as unknown as Classification };
+    if (a === "summary") return { summary: String(o.summary ?? "") };
+    if (a === "quotes") return { quotes: (o.quotes as string[]) ?? [] };
+    return { headlines: (o.headlines as { text: string; style: string }[]) ?? [] };
+  };
+
   const run = async (a: Action) => {
     setRunning((r) => new Set(r).add(a));
-    const res = await simulate(() => {
+    let serverRes: Results | null = null;
+    if (isServerMode() && a !== "images" && a !== "prepare") {
+      try {
+        serverRes = await viaServer(a);
+      } catch (e) {
+        toast("warning", "AI service unavailable", `${e instanceof Error ? e.message : String(e)} — showing rule-based suggestions.`);
+      }
+    }
+    const res = serverRes ?? await simulate(() => {
       switch (a) {
         case "classify":
           return { classify: classify(article) };
@@ -156,14 +179,19 @@ function Workspace({ article }: { article: Article }) {
       n.delete(a);
       return n;
     });
-    if (a === "classify" && res.classify) log({ kind: "ai", message: `Article classified as ${CONTENT_TYPE_LABELS[res.classify.type]} (confidence ${res.classify.confidence}): “${article.title}”`, articleId: article.id, actor: "PressFlow (demo)" });
+    if (a === "classify" && res.classify) log({ kind: "ai", message: `Article classified as ${CONTENT_TYPE_LABELS[res.classify.type]} (confidence ${res.classify.confidence}): “${article.title}”`, articleId: article.id, actor: isServerMode() ? "PressFlow AI" : "PressFlow (demo)" });
   };
-  const dismiss = (a: keyof Results) => setResults((r) => ({ ...r, [a]: undefined }));
+  const dismiss = (a: keyof Results, decided = false) => {
+    if (!decided) decideOnServer(proposalIds[a], "rejected");
+    setProposalIds((p) => ({ ...p, [a]: undefined }));
+    setResults((r) => ({ ...r, [a]: undefined }));
+  };
   const accept = (patch: Partial<Article>, what: string, key: keyof Results) => {
+    decideOnServer(proposalIds[key], "accepted", what);
     update(article.id, patch);
     log({ kind: "ai", message: `${what} accepted for “${article.title}”`, articleId: article.id });
     toast("success", `${what} accepted`, "Saved to the article in the Content Library.");
-    dismiss(key);
+    dismiss(key, true);
   };
 
   const placedOn = pages.filter((p) => p.articleId === article.id).sort((a, b) => a.number - b.number);

@@ -48,3 +48,7 @@ next-env.d.ts
 
 .vercel
 !.env.example
+
+# local server-mode data (PGlite database, local file storage)
+/.data/
+/.next-e2e/

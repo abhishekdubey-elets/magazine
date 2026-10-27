@@ -3,6 +3,8 @@
 import { ImagePlus, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { fileToAsset, imageSrc, sampleImageAssets } from "@/lib/images";
+import { uploadOriginal } from "@/lib/sync/assets";
+import { isServerMode } from "@/lib/sync/engine";
 import { useStore } from "@/lib/store";
 import type { ApprovalStatus, ImageAsset, ImageSubject, PageStatus, Severity } from "@/lib/types";
 import { toast } from "./shell/toast";
@@ -64,7 +66,7 @@ export function UploadButton({ onUploaded, label = "Upload image", variant = "se
       <input
         ref={input}
         type="file"
-        accept="image/*"
+        accept="image/*,.tif,.tiff"
         className="hidden"
         aria-label="Choose image file"
         onChange={async (e) => {
@@ -73,10 +75,12 @@ export function UploadButton({ onUploaded, label = "Upload image", variant = "se
           if (!file) return;
           setBusy(true);
           try {
-            const asset = await fileToAsset(file, compress);
+            // Server mode keeps the original untouched for print; demo mode stores a browser copy.
+            const asset = isServerMode() ? await uploadOriginal(file) : await fileToAsset(file, compress);
             addUpload(asset);
             onUploaded(asset.id);
-            toast("success", "Image added to library", `${asset.name} · ${asset.width}×${asset.height}px`);
+            const o = asset.original;
+            toast("success", "Image added to library", o ? `${asset.name} · ${o.width}×${o.height}px · ${o.colorSpace.toUpperCase()}${o.iccProfile ? ` · ${o.iccProfile}` : ""}` : `${asset.name} · ${asset.width}×${asset.height}px`);
           } catch (err) {
             toast("error", "Upload failed", err instanceof Error ? err.message : String(err));
           } finally {

@@ -11,6 +11,8 @@ import { useStore } from "@/lib/store";
 import { DEFAULT_FONT_FAMILIES } from "@/lib/indesign/build-manifest";
 import type { ExportFormat, FontRole, Settings } from "@/lib/types";
 import { fetchReadiness, integrationState, PDF_PRESETS, testServer, type ServerReadiness } from "@/services/indesign";
+import { FontsCard, TeamCard } from "@/components/settings/ServerCards";
+import { useCan, useWorkspace } from "@/lib/sync/engine";
 
 const SECTIONS = [
   ["brand", "Brand identity"],
@@ -20,12 +22,17 @@ const SECTIONS = [
   ["images", "Image handling"],
   ["export", "Export defaults"],
   ["indesign", "InDesign integration"],
+  ["fonts", "Licensed fonts"],
+  ["team", "Team & roles"],
 ] as const;
+const SERVER_ONLY = ["fonts", "team"];
 
 export default function SettingsPage() {
   const settings = useStore((s) => s.settings);
   const update = useStore((s) => s.updateSettings);
   const [active, setActive] = useState<(typeof SECTIONS)[number][0]>("brand");
+  const serverMode = useWorkspace((s) => s.setup?.mode === "server");
+  const canEdit = useCan("edit-settings");
   const set = <K extends keyof Settings>(k: K, patch: Partial<Settings[K]>) => update({ [k]: { ...settings[k], ...patch } } as Partial<Settings>);
 
   return (
@@ -33,7 +40,7 @@ export default function SettingsPage() {
       <PageHeader title="Settings" description="House rules applied to every generated page. Changes save automatically and re-flow open pages." />
       <div className="grid gap-5 md:grid-cols-[220px_1fr]">
         <nav aria-label="Settings sections" className="space-y-0.5 md:sticky md:top-5 md:self-start">
-          {SECTIONS.map(([id, label]) => (
+          {SECTIONS.filter(([id]) => serverMode || !SERVER_ONLY.includes(id)).map(([id, label]) => (
             <a
               key={id}
               href={`#${id}`}
@@ -45,6 +52,9 @@ export default function SettingsPage() {
           ))}
         </nav>
         <div className="min-w-0 space-y-5">
+          {!canEdit && (
+            <p className="rounded-lg border border-line bg-white px-4 py-3 text-[13px] text-ink-2">Workspace settings are managed by admins and designers. Changes you make here are not saved.</p>
+          )}
           <Card id="brand">
             <CardHeader title="Brand identity" description="Colours used by the application and default page accents." />
             <div className="grid gap-4 p-5 sm:grid-cols-2">
@@ -167,6 +177,9 @@ export default function SettingsPage() {
                   <option value="contain">Fit content proportionally</option>
                 </Select>
               </Field>
+              {serverMode ? (
+                <p className="text-[12.5px] text-ink-2 sm:col-span-2">Uploads are stored as untouched originals (no resizing or recompression); InDesign places the original file.</p>
+              ) : (
               <div className="flex items-start gap-3 sm:col-span-2">
                 <Switch checked={settings.images.compressUploads} onCheckedChange={(v) => set("images", { compressUploads: v })} label="Downscale uploads" />
                 <div>
@@ -174,6 +187,7 @@ export default function SettingsPage() {
                   <p className="text-[12px] text-muted">Keeps localStorage under its quota (max 1800 px). Disable to test resolution warnings with originals.</p>
                 </div>
               </div>
+              )}
             </div>
           </Card>
 
@@ -208,6 +222,8 @@ export default function SettingsPage() {
           </Card>
 
           <IntegrationCard />
+          {serverMode && <FontsCard />}
+          {serverMode && <TeamCard />}
         </div>
       </div>
     </div>
@@ -225,6 +241,7 @@ function IntegrationCard() {
   const [checks, setChecks] = useState<{ name: string; ok: boolean; detail: string }[] | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const state = integrationState(settings, server);
+  const serverMode = useWorkspace((s) => s.setup?.mode === "server");
 
   useEffect(() => {
     void fetchReadiness().then((r) => {
@@ -236,7 +253,9 @@ function IntegrationCard() {
   const rows: [string, boolean | undefined, string][] = [
     ["Adobe credentials", server?.adobe, "ADOBE_CLIENT_ID · ADOBE_CLIENT_SECRET (OAuth Server-to-Server, InDesign API)"],
     ["S3 input storage", server?.storage, "S3_BUCKET · S3_REGION · S3_ACCESS_KEY_ID · S3_SECRET_ACCESS_KEY"],
-    ["Access key", server?.apiKey, "PRESSFLOW_API_KEY — protects the paid InDesign routes"],
+    serverMode
+      ? ["Team sign-in", true, "Google Workspace accounts; designers and editors run builds, editors release to print"]
+      : ["Access key", server?.apiKey, "PRESSFLOW_API_KEY — protects the paid InDesign routes"],
   ];
 
   return (
@@ -275,11 +294,15 @@ function IntegrationCard() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          {serverMode ? (
+            <p className="text-[12.5px] text-ink-2">Checks the Adobe credentials, the storage bucket and the build script.</p>
+          ) : (
           <Field label="PressFlow access key" htmlFor="s-key" hint="The PRESSFLOW_API_KEY value. Kept in this browser only and sent with InDesign requests.">
             <Input id="s-key" type="password" autoComplete="off" value={integ.accessKey ?? ""} onChange={(e) => setInteg({ accessKey: e.target.value })} />
           </Field>
+          )}
           <Button
-            disabled={!server?.ready || !integ.accessKey}
+            disabled={!server?.ready || (!serverMode && !integ.accessKey)}
             loading={testing}
             onClick={async () => {
               setTesting(true);
@@ -340,7 +363,14 @@ function IntegrationCard() {
         <div>
           <p className="text-[12.5px] font-medium text-ink-2">Fonts in InDesign</p>
           <p className="mt-0.5 text-[12px] text-muted">
-            Family name InDesign uses for each type role. Upload the matching licensed OTF/TTF files to the bucket&apos;s <code className="rounded bg-canvas px-1">pressflow/fonts/</code> folder — they travel with every job. Missing fonts are reported after each build.
+            Family name InDesign uses for each type role.{" "}
+            {serverMode ? (
+              <>Upload the matching licensed OTF/TTF files under Licensed fonts below — print builds are blocked while a style is missing.</>
+            ) : (
+              <>
+                Upload the matching licensed OTF/TTF files to the bucket&apos;s <code className="rounded bg-canvas px-1">pressflow/fonts/</code> folder — they travel with every job. Missing fonts are reported after each build.
+              </>
+            )}
           </p>
           <div className="mt-2 grid gap-2 sm:grid-cols-5">
             {(Object.keys(DEFAULT_FONT_FAMILIES) as FontRole[]).map((role) => (
@@ -361,9 +391,27 @@ function IntegrationCard() {
           <ol className="mt-1.5 list-decimal space-y-1 pl-5 text-muted">
             <li>Adobe Developer Console: create a project, add <b>InDesign API</b> (Firefly Services) with OAuth Server-to-Server credentials.</li>
             <li>AWS: create an S3 bucket and an IAM user with read/write access to it.</li>
-            <li>Vercel → Environment Variables: the Adobe and S3 values above, plus a long random <code className="rounded bg-white px-1">PRESSFLOW_API_KEY</code>. Redeploy.</li>
-            <li>Upload your licensed fonts to <code className="rounded bg-white px-1">pressflow/fonts/</code> in the bucket.</li>
-            <li>Enter the access key here and click <b>Test connection</b>. The build script registers itself with Adobe on the first job.</li>
+            {serverMode ? (
+              <>
+                <li>Vercel → Environment Variables: the Adobe and S3 values above. Redeploy.</li>
+                <li>Upload your licensed fonts under <b>Licensed fonts</b> below.</li>
+                <li>
+                  Click <b>Test connection</b>. The build script registers itself with Adobe on the first job.
+                </li>
+              </>
+            ) : (
+              <>
+                <li>
+                  Vercel → Environment Variables: the Adobe and S3 values above, plus a long random <code className="rounded bg-white px-1">PRESSFLOW_API_KEY</code>. Redeploy.
+                </li>
+                <li>
+                  Upload your licensed fonts to <code className="rounded bg-white px-1">pressflow/fonts/</code> in the bucket.
+                </li>
+                <li>
+                  Enter the access key here and click <b>Test connection</b>. The build script registers itself with Adobe on the first job.
+                </li>
+              </>
+            )}
           </ol>
         </div>
       </div>

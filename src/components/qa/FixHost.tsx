@@ -8,6 +8,7 @@ import { proposeTrim, suggestCaption, type TrimProposal } from "@/lib/ai";
 import { storyBody, storyPages } from "@/lib/layout-engine";
 import { routes } from "@/lib/nav";
 import { useStore } from "@/lib/store";
+import { canNow } from "@/lib/sync/engine";
 import type { QAFix, QAIssue } from "@/lib/types";
 import { ImagePicker } from "../common";
 import { toast } from "../shell/toast";
@@ -79,6 +80,10 @@ export function useRunFix() {
         return;
       }
       case "approve-page":
+        if (!canNow("approve-pages")) {
+          toast("warning", "Editors approve pages", "Ask an editor to review and approve this page.");
+          return;
+        }
         s.setPageStatus(page.id, "approved");
         s.log({ kind: "qa", message: `Page ${page.number} approved`, pageId: page.id, tone: "success" });
         toast("success", `Page ${page.number} approved`);

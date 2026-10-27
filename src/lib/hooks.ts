@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import { makeContext, resolvePage, type LayoutContext } from "./layout-engine";
 import { runQa, summarize } from "./qa-engine";
 import { useStore } from "./store";
+import { useWorkspace } from "./sync/engine";
 import { fontShorthand, resetMeasureCache } from "./text-engine";
 import { paragraphStyles } from "./design-tokens";
 
@@ -34,10 +35,9 @@ export function useFontWatcher() {
   }, []);
 }
 
+/** The workspace is loaded (from this browser in demo mode, from the server otherwise). */
 export function useHydrated() {
-  const [h, setH] = useState(false);
-  useEffect(() => setH(true), []);
-  return h;
+  return useWorkspace((s) => s.status === "demo" || s.status === "ready");
 }
 
 export function usePublication() {
