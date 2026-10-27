@@ -66,6 +66,17 @@ export function PlanStage({ profile, publication }: { profile: ReferenceProfile;
   const byId = new Map(articles.map((a) => [a.id, a]));
   const selected = draft.articleIds.map((id) => byId.get(id)).filter((a): a is NonNullable<typeof a> => !!a);
   const unselected = articles.filter((a) => !draft.articleIds.includes(a.id) && a.id !== "art-closing");
+  const nextStep = !selected.length
+    ? "Tick articles under Content (left) to plan them — nothing to approve yet."
+    : plan.unresolved.length
+      ? "Resolve the conflicts below before the plan can be approved."
+      : !approved
+        ? canApprove
+          ? "Approve the plan to unlock generation."
+          : "An editor must approve the plan before it can be generated."
+        : !canEdit
+          ? "Your role cannot create publications."
+          : "Approved — generate the issue.";
 
   const toggle = (id: string) => setDraft({ articleIds: draft.articleIds.includes(id) ? draft.articleIds.filter((x) => x !== id) : [...draft.articleIds, id] });
   const move = (id: string, dir: -1 | 1) => {
@@ -275,6 +286,7 @@ export function PlanStage({ profile, publication }: { profile: ReferenceProfile;
               </ul>
             </div>
           )}
+          <p className={cn("mx-5 mt-4 rounded-md px-3 py-2 text-[12.5px]", approved ? "bg-ok-50 text-ok" : "bg-canvas text-ink-2")}>Next step: {nextStep}</p>
           <ul className="mx-5 mt-3 space-y-0.5 text-[12px] text-muted">
             {plan.notes.map((n) => (
               <li key={n}>• {n}</li>
