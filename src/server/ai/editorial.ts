@@ -6,17 +6,39 @@ import { CONTENT_TYPE_LABELS, classify, pullQuotes, suggestHeadlines, summarize 
 import type { Article, ContentType } from "@/lib/types";
 
 /**
- * Editorial AI on the server (Claude). Every result is a *proposal*: it is
- * stored with the article and only changes copy when a person accepts it.
- * Outputs are checked before they are shown — pull quotes must appear
- * word-for-word in the article, so nothing is put in an interviewee's mouth.
- * Without ANTHROPIC_API_KEY the built-in heuristics answer instead.
+ * Editorial AI on the server. Every result is a *proposal*: it is stored with
+ * the article and only changes copy when a person accepts it. Outputs are
+ * checked before they are shown — pull quotes must appear word-for-word in
+ * the article, so nothing is put in an interviewee's mouth.
+ *
+ * Providers, in order: OpenAI (OPENAI_API_KEY) is the default, Anthropic
+ * (ANTHROPIC_API_KEY) is used when OpenAI is not configured or fails, and
+ * without either key the built-in heuristics answer. AI_PROVIDER=anthropic
+ * or =openai pins one provider.
  */
 
 export type AiAction = "classify" | "summary" | "quotes" | "headlines";
 export const AI_ACTIONS: AiAction[] = ["classify", "summary", "quotes", "headlines"];
 
 export const MODEL = process.env.AI_MODEL ?? "claude-opus-5-5";
+export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o";
+export const OPENAI_URL = process.env.OPENAI_BASE_URL?.replace(/\/$/, "") ?? "https://api.openai.com/v1";
+
+export type AiProvider = "openai" | "anthropic" | "heuristic";
+
+/** Which providers are configured, in the order they are tried. */
+export function providerOrder(env: Record<string, string | undefined> = process.env): AiProvider[] {
+  const pinned = env.AI_PROVIDER;
+  const openai = !!env.OPENAI_API_KEY;
+  const anthropic = !!env.ANTHROPIC_API_KEY;
+  if (pinned === "openai") return openai ? ["openai"] : [];
+  if (pinned === "anthropic") return anthropic ? ["anthropic"] : [];
+  const out: AiProvider[] = [];
+  if (openai) out.push("openai");
+  if (anthropic) out.push("anthropic");
+  return out;
+}
+
 const TYPES = Object.keys(CONTENT_TYPE_LABELS) as [ContentType, ...ContentType[]];
 
 const SCHEMAS = {
@@ -28,6 +50,14 @@ const SCHEMAS = {
   summary: z.object({ summary: z.string() }),
   quotes: z.object({ quotes: z.array(z.string()) }),
   headlines: z.object({ headlines: z.array(z.object({ text: z.string(), style: z.string() })) }),
+};
+
+/** JSON Schemas (strict) for OpenAI structured outputs; mirror SCHEMAS. */
+const JSON_SCHEMAS: Record<AiAction, Record<string, unknown>> = {
+  classify: { type: "object", properties: { type: { type: "string", enum: TYPES }, confidence: { type: "number" }, reasons: { type: "array", items: { type: "string" } } }, required: ["type", "confidence", "reasons"], additionalProperties: false },
+  summary: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"], additionalProperties: false },
+  quotes: { type: "object", properties: { quotes: { type: "array", items: { type: "string" } } }, required: ["quotes"], additionalProperties: false },
+  headlines: { type: "object", properties: { headlines: { type: "array", items: { type: "object", properties: { text: { type: "string" }, style: { type: "string" } }, required: ["text", "style"], additionalProperties: false } } }, required: ["headlines"], additionalProperties: false },
 };
 
 const SYSTEM = `You are a senior sub-editor at Elets Technomedia, preparing articles for print in governance, technology and healthcare magazines (Indian English, house style: no exclamation marks, no clickbait, titles in title case).
@@ -43,7 +73,7 @@ const TASK: Record<AiAction, string> = {
 };
 
 export interface AiResult {
-  provider: "anthropic" | "heuristic";
+  provider: AiProvider;
   model: string | null;
   output: unknown;
   /** Proposals dropped by validation (e.g. a quote not found in the article). */
@@ -84,14 +114,19 @@ function heuristic(action: AiAction, a: Article): AiResult {
 
 let client: Anthropic | null = null;
 
-export async function runEditorialAi(action: AiAction, a: Article): Promise<AiResult> {
-  if (!process.env.ANTHROPIC_API_KEY) return heuristic(action, a);
-  client ??= new Anthropic();
-
-  const article = [`Title: ${a.title}`, a.subtitle ? `Deck: ${a.subtitle}` : "", `Author: ${a.author.name}${a.author.designation ? `, ${a.author.designation}` : ""}${a.author.organisation ? `, ${a.author.organisation}` : ""}`, "", a.body]
+const articleText = (a: Article) =>
+  [`Title: ${a.title}`, a.subtitle ? `Deck: ${a.subtitle}` : "", `Author: ${a.author.name}${a.author.designation ? `, ${a.author.designation}` : ""}${a.author.organisation ? `, ${a.author.organisation}` : ""}`, "", a.body]
     .filter((x) => x !== "")
     .join("\n");
 
+interface RawResult {
+  parsed: unknown;
+  model: string;
+  usage?: { input_tokens: number; output_tokens: number };
+}
+
+async function askAnthropic(action: AiAction, a: Article): Promise<RawResult> {
+  client ??= new Anthropic();
   const response = await client.beta.messages.parse({
     model: MODEL,
     max_tokens: 4000,
@@ -99,11 +134,62 @@ export async function runEditorialAi(action: AiAction, a: Article): Promise<AiRe
     fallbacks: "default",
     output_config: { effort: "medium", format: betaZodOutputFormat(SCHEMAS[action]) },
     system: SYSTEM,
-    messages: [{ role: "user", content: `<article>\n${article}\n</article>\n\n${TASK[action]}` }],
+    messages: [{ role: "user", content: `<article>\n${articleText(a)}\n</article>\n\n${TASK[action]}` }],
   });
   if (response.stop_reason === "refusal") throw new Error("The AI declined this article. Use the suggestions from the built-in rules instead.");
-  const parsed = response.parsed_output;
-  if (!parsed) throw new Error("The AI returned an unreadable answer. Try again.");
+  if (!response.parsed_output) throw new Error("The AI returned an unreadable answer. Try again.");
+  return { parsed: response.parsed_output, model: response.model, usage: { input_tokens: response.usage.input_tokens, output_tokens: response.usage.output_tokens } };
+}
+
+/** OpenAI chat completion with a strict JSON schema (raw HTTP; no SDK needed). */
+export async function askOpenAI(action: AiAction, a: Article, fetchFn: typeof fetch = fetch): Promise<RawResult> {
+  const res = await fetchFn(`${OPENAI_URL}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages: [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: `<article>\n${articleText(a)}\n</article>\n\n${TASK[action]}` },
+      ],
+      response_format: { type: "json_schema", json_schema: { name: `pressflow_${action}`, strict: true, schema: JSON_SCHEMAS[action] } },
+      max_completion_tokens: 2000,
+    }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  const body = (await res.json().catch(() => ({}))) as { error?: { message?: string }; model?: string; choices?: { message?: { content?: string; refusal?: string }; finish_reason?: string }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+  if (!res.ok) throw new Error(`OpenAI: ${body.error?.message ?? `HTTP ${res.status}`}`);
+  const choice = body.choices?.[0];
+  if (choice?.message?.refusal) throw new Error("The AI declined this article. Use the suggestions from the built-in rules instead.");
+  if (choice?.finish_reason === "length" || !choice?.message?.content) throw new Error("The AI returned an incomplete answer. Try again.");
+  let json: unknown;
+  try {
+    json = JSON.parse(choice.message.content);
+  } catch {
+    throw new Error("The AI returned an unreadable answer. Try again.");
+  }
+  const parsed = SCHEMAS[action].safeParse(json);
+  if (!parsed.success) throw new Error("The AI answer did not match the expected shape. Try again.");
+  return { parsed: parsed.data, model: body.model ?? OPENAI_MODEL, usage: body.usage ? { input_tokens: body.usage.prompt_tokens ?? 0, output_tokens: body.usage.completion_tokens ?? 0 } : undefined };
+}
+
+export async function runEditorialAi(action: AiAction, a: Article): Promise<AiResult> {
+  const order = providerOrder();
+  if (!order.length) return heuristic(action, a);
+  let raw: RawResult | undefined;
+  let provider: AiProvider = order[0];
+  const failures: string[] = [];
+  for (const p of order) {
+    try {
+      raw = p === "openai" ? await askOpenAI(action, a) : await askAnthropic(action, a);
+      provider = p;
+      break;
+    } catch (e) {
+      failures.push(`${p}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  if (!raw) throw new Error(failures.join(" · "));
+  const parsed = raw.parsed;
 
   const rejected: string[] = [];
   let output: unknown = parsed;
@@ -120,5 +206,5 @@ export async function runEditorialAi(action: AiAction, a: Article): Promise<AiRe
     const c = parsed as z.infer<typeof SCHEMAS.classify>;
     output = { ...c, confidence: Math.round(Math.max(0, Math.min(1, c.confidence)) * 100) / 100, scores: [{ type: c.type, score: c.confidence }] };
   }
-  return { provider: "anthropic", model: response.model, output, rejected, usage: { input_tokens: response.usage.input_tokens, output_tokens: response.usage.output_tokens } };
+  return { provider, model: raw.model, output, rejected, usage: raw.usage };
 }

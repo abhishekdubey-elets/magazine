@@ -27,7 +27,7 @@ pipeline are deployed but switched off until their environment variables are set
 | Automated print pipeline on the Adobe InDesign API: build manifest, ExtendScript build script, S3 staging, PDF/X + INDD + IDML + page previews, preflight report | `256071a`, `2c82b41` | Built; needs Adobe + S3 credentials |
 | Team backend: Postgres, Google Workspace sign-in, roles, shared workspace with conflict protection, audit trail, article history | `e3b4c79` | Built; needs `DATABASE_URL` + sign-in settings |
 | Print-quality protection: server-stamped approvals, pre-build gates, untouched image originals, licensed-font checks, archived outputs, editor release sign-off | `e3b4c79` | Built; gates work without Adobe, builds need Adobe |
-| Server AI (Claude) with stored proposals and accept/reject log | `e3b4c79` | Built; uses built-in rules until `ANTHROPIC_API_KEY` is set |
+| Server AI (OpenAI by default, Anthropic as fallback) with stored proposals and accept/reject log | `e3b4c79` | Built; uses built-in rules until `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is set |
 | Fix: Layout Studio crashed when the selected publication had no pages; screen-level error page | `a1870ca` | Done, live |
 | Reference-to-Magazine Studio: design spec with confidence and evidence, editable/confirmable design system, six format templates, new-topic issue planner, constrained generation, issue QA (blocker/warning/info), bulk corrections with undo, parent pages/layers/named styles in InDesign, pilot time report, vitest suite | — | Built and tested locally; not yet committed or deployed |
 
@@ -55,7 +55,7 @@ InDesign produces print files, and nothing reaches it unless the quality gates p
 
 **Not verified yet:** a real job on Adobe's servers (typesetting, preflight presets, fonts and image
 placement inside InDesign), archiving real outputs to S3, Google sign-in against a real OAuth
-client, a hosted Postgres database, and Claude responses. These need the accounts listed below.
+client, a hosted Postgres database, and OpenAI or Claude responses. These need the accounts listed below.
 
 ### To switch on the full product
 
@@ -66,7 +66,7 @@ client, a hosted Postgres database, and Claude responses. These need the account
 | S3 bucket + IAM user → `S3_*`, bucket CORS rule | Originals, fonts, job files, archived outputs | AWS + Vercel env |
 | Adobe Developer Console project with InDesign API → `ADOBE_CLIENT_ID`, `ADOBE_CLIENT_SECRET`, `ADOBE_SCOPES` | Print builds | Adobe + Vercel env |
 | Licensed OTF/TTF files for the house fonts | No font substitution in print | Settings → Licensed fonts |
-| Optional: `ANTHROPIC_API_KEY`, `CRON_SECRET` | AI suggestions; daily archive of unwatched builds | Vercel env |
+| Optional: `OPENAI_API_KEY` (default LLM) or `ANTHROPIC_API_KEY` (fallback), `CRON_SECRET` | AI suggestions; daily archive of unwatched builds | Vercel env |
 
 Then redeploy, sign in as an admin, choose **Set up with the sample issue**, upload fonts, set roles,
 and run **Export Center → Check print readiness** followed by a first print build. Details are in
@@ -148,7 +148,7 @@ pdf.js — the file is never uploaded.
 | Exports: PDF proof (bleed + crop marks), web PDF, PNG page ZIP, JSON content package, InDesign handoff ZIP, print view (vector, via browser print) | Real downloadable files |
 | Create Like This — measurement of a reference PDF (boxes, type, grid, images, colour, sections) | Real, in-browser (pdf.js) |
 | Create Like This — page classification and style inference | Rule-based heuristics on measured data (labelled) |
-| "AI" — classification, summary, pull quotes, headlines | Claude on the server when configured (server mode); otherwise deterministic local heuristics (labelled in the UI) |
+| "AI" — classification, summary, pull quotes, headlines | OpenAI (default) or Claude on the server when configured (server mode); otherwise deterministic local heuristics (labelled in the UI) |
 | "AI" — image opportunities, layout recommendation, trim proposals | Deterministic local heuristics |
 | Reference-to-Magazine Studio: design spec with confidence, format templates, issue planning, generation, issue QA, bulk corrections, pilot timings | Real, in-browser; InDesign build, print gates and release need server mode |
 | Team workspace, sign-in, roles, approvals, audit trail | Real when `DATABASE_URL` is set (server mode); browser-only demo otherwise |
@@ -194,7 +194,7 @@ src/
     print/             Print gates, font library, InDesign job records and release
     indesign/          InDesign API pipeline and the ExtendScript build script
     assets/            Original-image measurement and previews
-    ai/                Claude editorial suggestions
+    ai/                Editorial suggestions (OpenAI default, Anthropic fallback, rules otherwise)
     storage/           S3 or local file storage
   middleware.ts        Sign-in required for every page in server mode
 drizzle/               SQL migrations
@@ -252,8 +252,9 @@ Without it, everything keeps working as the browser demo.
   only shows a preview. InDesign places the original.
 - **Licensed fonts** (Settings → Licensed fonts): parsed with the names InDesign sees, including
   variable-font instances.
-- **Server AI** (AI Content Preparation): Claude (`claude-opus-5-5`) when `ANTHROPIC_API_KEY` is set,
-  otherwise the built-in rules. Every result is a stored proposal with the accept/reject decision
+- **Server AI** (AI Content Preparation): OpenAI (`OPENAI_API_KEY`, model `OPENAI_MODEL`, default
+  `gpt-4o`) by default; Claude (`ANTHROPIC_API_KEY`, `claude-opus-5-5`) when OpenAI is not configured
+  or its call fails; `AI_PROVIDER` pins one. Without either key, the built-in rules. Every result is a stored proposal with the accept/reject decision
   logged; pull quotes must appear in the article word-for-word or they are dropped.
 
 **Print-quality guarantees**
@@ -283,7 +284,7 @@ Without it, everything keeps working as the browser demo.
 3. S3 bucket (the same one the InDesign pipeline uses). Add a CORS rule so the browser can upload
    originals and fonts directly and download originals:
    `[{"AllowedOrigins":["https://<your-domain>"],"AllowedMethods":["GET","PUT"],"AllowedHeaders":["content-type"],"MaxAgeSeconds":3600}]`
-4. Optional: `ANTHROPIC_API_KEY` for AI suggestions, `CRON_SECRET` for the daily fallback that
+4. Optional: `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`) for AI suggestions, `CRON_SECRET` for the daily fallback that
    archives builds nobody was watching (`vercel.json`).
 5. Sign in as an admin, click **Set up with the sample issue**, upload the licensed fonts, invite
    the team (they appear after their first sign-in) and set roles.

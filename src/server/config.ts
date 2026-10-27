@@ -114,7 +114,7 @@ export function setup(): ServerSetup {
     database,
     auth: { secret, google, devLogin: env.auth.devLogin, allowedDomains: env.auth.allowedDomains },
     storage: { driver: env.storage.driver, ready: storageReady },
-    ai: { provider: process.env.ANTHROPIC_API_KEY ? "anthropic" : null },
+    ai: { provider: process.env.AI_PROVIDER === "anthropic" && process.env.ANTHROPIC_API_KEY ? "anthropic" : process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : null },
     missing,
   };
 }
