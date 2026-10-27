@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PageStatusBadge, SEVERITY } from "@/components/common";
+import { EmptyState, PageStatusBadge, SEVERITY } from "@/components/common";
 import { PageRenderer, PageThumb, type Geometry } from "@/components/page/PageRenderer";
 import { TemplateWireframe } from "@/components/page/TemplateWireframe";
 import { FIX_LABELS, useRunFix } from "@/components/qa/FixHost";
@@ -40,6 +40,18 @@ import { ElementProperties, PageProperties } from "./PropertiesPanel";
 type RightTab = "properties" | "checks";
 
 export function LayoutStudio() {
+  const count = useLayoutContext().pages.length;
+  if (!count) {
+    return (
+      <div className="p-8">
+        <EmptyState title="This publication has no pages yet" description="Add pages in Publications, or switch to another publication." />
+      </div>
+    );
+  }
+  return <StudioWorkspace />;
+}
+
+function StudioWorkspace() {
   const params = useSearchParams();
   const router = useRouter();
   const ctx = useLayoutContext();
