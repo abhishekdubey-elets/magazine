@@ -7,9 +7,10 @@ import { fmtBytes, fmtDateTime } from "@/components/common";
 import { toast } from "@/components/shell/toast";
 import { Badge, Button, Card, CardHeader, cn, Progress, Segmented } from "@/components/ui";
 import { AnalysisError, analyzeReference, type AnalyzeProgress } from "@/lib/reference/analyze";
+import { AI_IMAGE_WIDTH, recognizeProfile } from "@/lib/reference/recognize-client";
 import { deriveDesignSpec } from "@/lib/reference/spec";
 import { useStore } from "@/lib/store";
-import { useCan } from "@/lib/sync/engine";
+import { useCan, useWorkspace } from "@/lib/sync/engine";
 import type { ReferenceProfile } from "@/lib/types";
 import { useStudio } from "./studio-state";
 
@@ -18,6 +19,8 @@ export function UploadStage({ profile }: { profile?: ReferenceProfile }) {
   const router = useRouter();
   const references = useStore((s) => s.references);
   const canEdit = useCan("edit-references");
+  const aiProvider = useWorkspace((s) => s.setup?.ai.provider ?? null);
+  const [useAi, setUseAi] = useState(true);
   const setStage = useStudio((s) => s.setStage);
   const openReference = useStudio((s) => s.openReference);
   const [progress, setProgress] = useState<AnalyzeProgress | null>(null);
@@ -39,12 +42,25 @@ export function UploadStage({ profile }: { profile?: ReferenceProfile }) {
     ctrl.current = new AbortController();
     setProgress({ stage: "Starting", value: 0 });
     try {
-      const measured = await analyzeReference(file, { maxPages: Number(maxPages), onProgress: setProgress, signal: ctrl.current.signal });
-      const spec = deriveDesignSpec(measured);
-      const next = { ...measured, spec };
+      const withAi = !!aiProvider && useAi;
+      const { aiImages, ...measured } = await analyzeReference(file, { maxPages: Number(maxPages), onProgress: setProgress, signal: ctrl.current.signal, aiImageWidth: withAi ? AI_IMAGE_WIDTH : undefined });
+      let profile: ReferenceProfile = measured;
+      let aiNote = "";
+      if (withAi && aiImages) {
+        try {
+          profile = await recognizeProfile(measured, aiImages, { onProgress: setProgress, signal: ctrl.current.signal });
+          const d = profile.ai?.disagreements.length ?? 0;
+          aiNote = ` · AI recognised ${profile.ai?.pages ?? 0} pages${d ? ` (${d} differ from the rules — check them)` : ""}`;
+        } catch (e) {
+          if (ctrl.current?.signal.aborted) throw e;
+          toast("warning", "AI recognition unavailable — rules used", e instanceof Error ? e.message : String(e));
+        }
+      }
+      const spec = deriveDesignSpec(profile);
+      const next = { ...profile, spec };
       useStore.getState().addReference(next);
-      useStore.getState().log({ kind: "ai", message: `Reference analysed for the studio: “${next.name}” — ${next.pages.length} pages measured, design spec v${spec.version} (${spec.review.warnings.length} warnings)`, actor: "PressFlow (local analysis)" });
-      toast("success", "Analysis complete", `${next.pages.length} pages measured in ${(next.durationMs / 1000).toFixed(1)} s`);
+      useStore.getState().log({ kind: "ai", message: `Reference analysed for the studio: “${next.name}” — ${next.pages.length} pages measured${next.ai ? `, ${next.ai.pages} recognised by ${next.ai.provider === "openai" ? "OpenAI" : "Claude"}` : ""}, design spec v${spec.version} (${spec.review.warnings.length} warnings)`, actor: next.ai ? "PressFlow (measurement + AI recognition)" : "PressFlow (local analysis)" });
+      toast("success", "Analysis complete", `${next.pages.length} pages measured in ${(next.durationMs / 1000).toFixed(1)} s${aiNote}`);
       open(next.id);
     } catch (e) {
       const msg = e instanceof AnalysisError ? e.message : `Analysis failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -75,7 +91,7 @@ export function UploadStage({ profile }: { profile?: ReferenceProfile }) {
             <p className="text-[14px] font-semibold text-ink">Analysing “{fileName}”</p>
             <p className="mt-0.5 text-[13px] text-muted">{progress.stage}</p>
             <Progress className="mt-3" value={progress.value} />
-            <p className="mt-3 text-[12px] text-muted">Page boxes, text runs, image placements and colours are measured from the PDF itself; page types are inferred by rules. The file is read in this browser and is not uploaded.</p>
+            <p className="mt-3 text-[12px] text-muted">Page boxes, text runs, image placements and colours are measured from the PDF itself in this browser. {aiProvider && useAi ? "Page types, sections and text roles are then recognised by the AI from page images sent to the server — nothing it says changes a measurement." : "Page types are inferred by rules."} The PDF itself is never uploaded.</p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => ctrl.current?.abort()}>
             <X /> Cancel
@@ -110,6 +126,17 @@ export function UploadStage({ profile }: { profile?: ReferenceProfile }) {
           <span className="text-[12.5px] font-medium text-ink-2">Pages to measure</span>
           <Segmented size="sm" value={maxPages} onChange={setMaxPages} options={[{ value: "24", label: "Up to 24 (fast)" }, { value: "40", label: "Up to 40" }, { value: "80", label: "Up to 80 (thorough)" }]} />
         </div>
+        <label className={cn("mt-3 flex items-start gap-2.5 text-[12.5px]", aiProvider ? "text-ink-2" : "text-muted")}>
+          <input type="checkbox" className="mt-0.5" checked={!!aiProvider && useAi} disabled={!aiProvider} onChange={(e) => setUseAi(e.target.checked)} />
+          <span>
+            <span className="font-medium">AI recognition of page types, sections and text roles</span>{" "}
+            {aiProvider ? (
+              <span className="text-muted">(via {aiProvider === "openai" ? "OpenAI" : "Claude"} on the server, page images only). Measurements stay rule-based; every answer is shown with its confidence and can be corrected.</span>
+            ) : (
+              <span>— not available: no AI provider key is set on the server; rules classify the pages.</span>
+            )}
+          </span>
+        </label>
         {error && <p className="mt-4 rounded-md bg-err-50 px-3 py-2 text-[13px] text-err">{error}</p>}
         {!canEdit && <p className="mt-4 text-[12.5px] text-muted">Your role cannot analyse references; open a saved analysis instead.</p>}
         {profile && (

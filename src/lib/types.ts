@@ -628,7 +628,12 @@ export interface RefRect {
   h: number;
 }
 
+/** Editorial role of a text block on a reference page (AI recognition; rules otherwise infer roles from size and position). */
+export type RefBlockRole = "headline" | "deck" | "standfirst" | "body" | "subheading" | "caption" | "pullquote" | "byline" | "name" | "designation" | "kicker" | "question" | "running-head" | "folio" | "other";
+
 export interface RefTextBlock extends RefRect {
+  /** Role recognised by the AI pass (absent when only rules ran). */
+  role?: RefBlockRole;
   /** Dominant point size. */
   size: number;
   font: string;
@@ -656,10 +661,12 @@ export interface RefPage {
   /** 1-based page number in the reference file. */
   number: number;
   type: RefPageType;
-  /** Detected type before any manual correction. */
+  /** Type detected by the rules before AI recognition or any manual correction. */
   detectedType: RefPageType;
   confidence: number;
   reasons: string[];
+  /** AI recognition of this page (type, section, text roles), kept beside the rules' result. */
+  ai?: RefPageAi;
   thumb?: string;
   blocks: RefTextBlock[];
   images: RefRect[];
@@ -668,6 +675,30 @@ export interface RefPage {
   textChars: number;
   bodyChars: number;
   imageCoverage: number;
+}
+
+export interface RefPageAi {
+  type: RefPageType;
+  /** 0–1. */
+  confidence: number;
+  /** Section name read from the page (running head, kicker), if any. */
+  section?: string;
+  reasons: string[];
+  /** The rules detected a different type. */
+  disagrees: boolean;
+  /** AI's type was adopted as the page type (confident enough); otherwise the rules' type stands. */
+  adopted: boolean;
+}
+
+/** AI recognition pass over a reference (page types, sections, text roles). Measurements are never AI-derived. */
+export interface ReferenceAi {
+  provider: "openai" | "anthropic";
+  model: string;
+  at: string;
+  pages: number;
+  /** Pages where AI and rules disagreed. */
+  disagreements: number[];
+  usage?: { input_tokens: number; output_tokens: number };
 }
 
 export interface RefFontUse {
@@ -711,6 +742,8 @@ export interface ReferenceProfile {
   oddSizes?: { number: number; width: number; height: number }[];
   /** Reviewable design specification derived from this reference (versioned). */
   spec?: DesignSpec;
+  /** AI recognition summary, when the pass ran. */
+  ai?: ReferenceAi;
 }
 
 export interface ReferenceEvidence {
@@ -728,7 +761,7 @@ export interface ReferenceEvidence {
 
 /* ------------------------------------------------- Design specification */
 
-export type FindingSource = "extracted" | "inferred" | "default" | "confirmed";
+export type FindingSource = "extracted" | "inferred" | "ai" | "default" | "confirmed";
 
 /** One property of the reference design with how sure we are and why. */
 export interface Finding<T> {

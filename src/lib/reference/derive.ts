@@ -21,6 +21,7 @@ import type {
   TextStyle,
 } from "../types";
 import { fontRole, isFurniture, rankedPages, representatives } from "./analyze";
+import { roleBlock } from "./recognize";
 
 /**
  * "Create like this": turns a measured reference profile into templates and a
@@ -169,7 +170,10 @@ export function deriveTemplate(profile: ReferenceProfile, page: RefPage, kind: R
   // Headline: the largest type on the page, merged with neighbouring display lines.
   const big = content.filter((b) => b.size >= body * 1.6 && b.chars >= 3).sort((a, b) => b.size - a.size);
   // A usable model has a real headline: large type in the top half (openers may sit lower).
-  const head = big.find((b) => b.size >= profile.body.size * 1.8 && (kind === "feature-opener" || b.y < H * 0.5));
+  // When the AI pass recognised a headline block, that block is the headline (it must still be display-sized).
+  const aiHead = roleBlock(content, "headline");
+  const head = (aiHead && aiHead.size >= profile.body.size * 1.5 ? aiHead : undefined) ?? big.find((b) => b.size >= profile.body.size * 1.8 && (kind === "feature-opener" || b.y < H * 0.5));
+  if (aiHead && head === aiHead) notes.push("Headline block recognised by the AI");
   let title: RefRect | undefined;
   if (head) {
     const group = [head, ...big.slice(1).filter((b) => b.size >= head.size * 0.55 && b.y < head.y + head.h + head.size * 0.7 && b.y + b.h > head.y - head.size * 0.9 && overlapX(b, head) > -10)];
@@ -183,7 +187,7 @@ export function deriveTemplate(profile: ReferenceProfile, page: RefPage, kind: R
 
   // Kicker above the headline.
   if (title) {
-    const k = content.find((b) => !used.has(b) && b.size <= body * 1.4 && b.chars <= 40 && b.y + b.h <= title!.y + 2 && b.y + b.h > title!.y - 22 && overlapX(b, title!) > 0);
+    const k = roleBlock(content, "kicker", used) ?? content.find((b) => !used.has(b) && b.size <= body * 1.4 && b.chars <= 40 && b.y + b.h <= title!.y + 2 && b.y + b.h > title!.y - 22 && overlapX(b, title!) > 0);
     if (k) {
       used.add(k);
       frames.push({ id: "kicker", kind: "text", role: "kicker", label: "Kicker", ...roundRect(pad(k, 0, 0, Math.max(0, title.x + title.w - k.x - k.w), 1)), bind: kind === "interview" ? "static" : "section", text: kind === "interview" ? "Interview" : undefined, styleId: "kicker", style: { size: r1(Math.min(k.size, 9)), align: centred(k) ? "center" : "left" }, z: 2 });
@@ -192,9 +196,11 @@ export function deriveTemplate(profile: ReferenceProfile, page: RefPage, kind: R
 
   // Deck under (or over) the headline.
   if (title && head) {
-    const d = content
-      .filter((b) => !used.has(b) && b.size > body * 1.1 && b.size < head.size * 0.75 && b.chars >= 12 && b.lines <= 5 && Math.abs(b.y - (title!.y + title!.h)) < 45)
-      .sort((a, b) => Math.abs(a.y - title!.y - title!.h) - Math.abs(b.y - title!.y - title!.h))[0];
+    const d =
+      roleBlock(content, "deck", used) ??
+      content
+        .filter((b) => !used.has(b) && b.size > body * 1.1 && b.size < head.size * 0.75 && b.chars >= 12 && b.lines <= 5 && Math.abs(b.y - (title!.y + title!.h)) < 45)
+        .sort((a, b) => Math.abs(a.y - title!.y - title!.h) - Math.abs(b.y - title!.y - title!.h))[0];
     if (d) {
       used.add(d);
       frames.push({ id: "deck", kind: "text", role: "deck", label: "Deck", ...roundRect(pad(d, 0, 0, 0, d.h * 0.25)), bind: "subtitle", styleId: "deck", style: styleFor(d, { weight: d.bold ? 700 : 300, color: kind === "feature-opener" && title && imgs[0] && overlapsArea(d, imgs[0]) > 0.5 ? "#e2e7f2" : "#3a4253", align: centred(d) ? "center" : "left" }), optional: true, autoFit: true, z: 2 });
@@ -205,10 +211,10 @@ export function deriveTemplate(profile: ReferenceProfile, page: RefPage, kind: R
   if ((kind === "interview" || kind === "message") && imgs[0]) {
     const img = imgs[0];
     const near = (b: RefTextBlock) => overlapX(b, img) > Math.min(b.w, img.w) * 0.5 && b.y > img.y + img.h * 0.5 && b.y < img.y + img.h + 30;
-    const name = content.filter((b) => !used.has(b) && near(b) && b.size >= body * 1.05 && b.size <= body * 2.6 && b.chars <= 45 && b.lines <= 2).sort((a, b) => b.size - a.size)[0];
+    const name = roleBlock(content, "name", used) ?? content.filter((b) => !used.has(b) && near(b) && b.size >= body * 1.05 && b.size <= body * 2.6 && b.chars <= 45 && b.lines <= 2).sort((a, b) => b.size - a.size)[0];
     if (name) {
       used.add(name);
-      const role = content.filter((b) => !used.has(b) && near(b) && b.y >= name.y + name.h - 1 && b.y < name.y + name.h + 14 && b.size < name.size).sort((a, b) => a.y - b.y)[0];
+      const role = roleBlock(content, "designation", used) ?? content.filter((b) => !used.has(b) && near(b) && b.y >= name.y + name.h - 1 && b.y < name.y + name.h + 14 && b.size < name.size).sort((a, b) => a.y - b.y)[0];
       if (role) used.add(role);
       const band = union([name, ...(role ? [role] : [])]);
       // Names set on, or butting up to, the portrait sit on a coloured band in the reference.
@@ -226,7 +232,8 @@ export function deriveTemplate(profile: ReferenceProfile, page: RefPage, kind: R
 
   // Captions next to images.
   imgs.forEach((img, i) => {
-    const c = content.find((b) => !used.has(b) && b.size <= body * 0.95 && b.size >= body * 0.55 && b.chars >= 12 && b.lines <= 4 && overlapX(b, img) > Math.min(b.w, img.w) * 0.5 && ((b.y >= img.y + img.h - 2 && b.y < img.y + img.h + 10) || (b.y + b.h <= img.y + 2 && b.y + b.h > img.y - 10)));
+    const adjacent = (b: RefTextBlock) => overlapX(b, img) > Math.min(b.w, img.w) * 0.5 && ((b.y >= img.y + img.h - 2 && b.y < img.y + img.h + 10) || (b.y + b.h <= img.y + 2 && b.y + b.h > img.y - 10));
+    const c = content.find((b) => !used.has(b) && b.role === "caption" && adjacent(b)) ?? content.find((b) => !used.has(b) && b.size <= body * 0.95 && b.size >= body * 0.55 && b.chars >= 12 && b.lines <= 4 && adjacent(b));
     if (c) {
       used.add(c);
       frames.push({ id: i === 0 ? "caption" : `caption-${i + 1}`, kind: "text", role: "caption", label: `Caption ${i + 1}`, ...roundRect(pad(c, 0, 0, 0, 2)), bind: `caption.${i}` as FrameSpec["bind"], styleId: "caption", style: styleFor(c, { italic: /italic|oblique/i.test(c.font), weight: 400, color: ink.muted }), optional: i > 0 });
@@ -296,7 +303,7 @@ export function deriveTemplate(profile: ReferenceProfile, page: RefPage, kind: R
   // Standfirst between deck and body (bold, slightly larger than body).
   const firstBody = merged[0]?.r;
   if (title && firstBody) {
-    const sf = content.find((b) => !used.has(b) && b.size >= body * 0.98 && b.size <= body * 1.45 && b.lines >= 2 && b.y > title!.y && b.y + b.h <= firstBody.y + 2 && (b.bold || b.size > body * 1.08));
+    const sf = roleBlock(content, "standfirst", used) ?? content.find((b) => !used.has(b) && b.size >= body * 0.98 && b.size <= body * 1.45 && b.lines >= 2 && b.y > title!.y && b.y + b.h <= firstBody.y + 2 && (b.bold || b.size > body * 1.08));
     if (sf) {
       used.add(sf);
       frames.push({ id: "intro", kind: "text", role: "intro", label: "Standfirst", ...roundRect(pad(sf, 0, 0, 0, sf.h * 0.3)), bind: "summary", styleId: "intro-bold", style: styleFor(sf, { color: ACCENT, align: "left" }), optional: true });
@@ -305,7 +312,7 @@ export function deriveTemplate(profile: ReferenceProfile, page: RefPage, kind: R
 
   // One pull quote: mid-size type that is not deck, standfirst or caption.
   if (head) {
-    const pq = content.find((b) => !used.has(b) && b.size >= body * 1.25 && b.size < head.size * 0.85 && b.lines >= 2 && b.lines <= 7 && b.chars >= 30);
+    const pq = roleBlock(content, "pullquote", used) ?? content.find((b) => !used.has(b) && b.size >= body * 1.25 && b.size < head.size * 0.85 && b.lines >= 2 && b.lines <= 7 && b.chars >= 30);
     if (pq) {
       used.add(pq);
       frames.push({ id: "quote", kind: "text", role: "pullquote", label: "Pull quote", ...roundRect(pad(pq, 0, 0, 0, pq.h * 0.3)), bind: "pullquote.0", styleId: "pullquote", style: styleFor(pq, { color: ACCENT }), optional: true });
@@ -313,7 +320,7 @@ export function deriveTemplate(profile: ReferenceProfile, page: RefPage, kind: R
   }
 
   // Byline.
-  const by = content.find((b) => !used.has(b) && b.size <= body * 1.05 && b.chars <= 90 && /^\s*(by\b|in conversation|interview(ed)? by|text:)/i.test(b.text));
+  const by = roleBlock(content, "byline", used) ?? content.find((b) => !used.has(b) && b.size <= body * 1.05 && b.chars <= 90 && /^\s*(by\b|in conversation|interview(ed)? by|text:)/i.test(b.text));
   if (by) {
     used.add(by);
     frames.push({ id: "byline", kind: "text", role: "byline", label: "Byline", ...roundRect(pad(by, 0, 0, 0, 1)), bind: "byline", styleId: "byline", optional: true });

@@ -1,5 +1,6 @@
 "use client";
 
+import type { RecognitionRequest, RecognitionResult } from "@/lib/reference/recognize";
 import { flushSync } from "@/lib/sync/engine";
 
 export type ServerAiAction = "classify" | "summary" | "quotes" | "headlines";
@@ -19,6 +20,14 @@ export async function proposeOnServer(action: ServerAiAction, articleId: string)
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error ?? `AI request failed (${res.status})`);
   return body as ServerAiResult;
+}
+
+/** AI recognition of reference pages (one batch). Works in demo and server mode when a provider key is set. */
+export async function recognizeOnServer(request: RecognitionRequest): Promise<RecognitionResult> {
+  const res = await fetch("/api/ai/reference", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? `AI recognition failed (${res.status})`);
+  return body as RecognitionResult;
 }
 
 /** Record the person's decision on a proposal (audit trail). Best effort. */

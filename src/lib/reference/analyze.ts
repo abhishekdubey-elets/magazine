@@ -23,7 +23,14 @@ export interface AnalyzeOptions {
   maxPages: number;
   onProgress: (p: AnalyzeProgress) => void;
   signal?: AbortSignal;
+  /** Also render each measured page at this width (px) for the AI recognition pass (not stored with the profile). */
+  aiImageWidth?: number;
 }
+
+export type AnalyzeResult = ReferenceProfile & {
+  /** Larger page renders for AI recognition, keyed by page number (transient). */
+  aiImages?: Record<number, string>;
+};
 
 type Matrix = [number, number, number, number, number, number];
 type PdfJs = typeof import("pdfjs-dist");
@@ -351,6 +358,7 @@ interface PageWork {
   images: RefRect[];
   lines: Line[];
   thumb?: string;
+  aiImage?: string;
   coverage: number;
   rotated: number;
 }
@@ -417,7 +425,7 @@ function columnCount(bodyBlocks: RefTextBlock[]) {
 
 /* ---------------------------------------------------------------- main */
 
-export async function analyzeReference(file: File, opts: AnalyzeOptions): Promise<ReferenceProfile> {
+export async function analyzeReference(file: File, opts: AnalyzeOptions): Promise<AnalyzeResult> {
   const t0 = performance.now();
   const { onProgress, signal } = opts;
   const check = () => {
@@ -553,8 +561,9 @@ export async function analyzeReference(file: File, opts: AnalyzeOptions): Promis
           .filter((r): r is RefRect => !!r && r.w >= 8 && r.h >= 8),
       );
 
-      // Thumbnail + colour sampling.
-      const scale = 116 / trimW;
+      // Thumbnail + colour sampling (rendered larger when the AI pass needs a readable page image).
+      const renderW = Math.max(116, opts.aiImageWidth ?? 0);
+      const scale = renderW / trimW;
       const vp = page.getViewport({ scale });
       canvas.width = Math.round(vp.width);
       canvas.height = Math.round(vp.height);
@@ -562,9 +571,10 @@ export async function analyzeReference(file: File, opts: AnalyzeOptions): Promis
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvasContext: ctx2d, viewport: vp, intent: "print" }).promise;
       hist.add(ctx2d.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
-      const thumb = cropToTrim(canvas, trimL * scale, trimT * scale, trimW * scale, trimH * scale, 0.62);
+      const thumb = cropToTrim(canvas, trimL * scale, trimT * scale, trimW * scale, trimH * scale, 0.62, 116);
+      const aiImage = opts.aiImageWidth ? cropToTrim(canvas, trimL * scale, trimT * scale, trimW * scale, trimH * scale, 0.72) : undefined;
 
-      work.push({ number: n, blocks, images: images.slice(0, 16), lines, thumb, coverage: coverage(images, W, H), rotated });
+      work.push({ number: n, blocks, images: images.slice(0, 16), lines, thumb, aiImage, coverage: coverage(images, W, H), rotated });
       page.cleanup();
     }
 
@@ -722,7 +732,9 @@ export async function analyzeReference(file: File, opts: AnalyzeOptions): Promis
     if (swapped) notes.push(`Fonts not available in the browser are substituted with the closest web font (e.g. ${swapped.name} → ${swapped.substitute}).`);
 
     onProgress({ stage: "Done", value: 100 });
+    const aiImages = opts.aiImageWidth ? Object.fromEntries(work.filter((p) => p.aiImage).map((p) => [p.number, p.aiImage!])) : undefined;
     return {
+      aiImages,
       id: `ref-${Date.now().toString(36)}`,
       name: file.name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").trim().slice(0, 80),
       fileName: file.name,
@@ -835,10 +847,11 @@ function justified(work: PageWork[], body: number) {
   return total > 0 && aligned / total > 0.55;
 }
 
-function cropToTrim(canvas: HTMLCanvasElement, x: number, y: number, w: number, h: number, q: number) {
+function cropToTrim(canvas: HTMLCanvasElement, x: number, y: number, w: number, h: number, q: number, outW?: number) {
   const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.round(w));
-  c.height = Math.max(1, Math.round(h));
+  const k = outW ? outW / w : 1;
+  c.width = Math.max(1, Math.round(w * k));
+  c.height = Math.max(1, Math.round(h * k));
   c.getContext("2d")!.drawImage(canvas, x, y, w, h, 0, 0, c.width, c.height);
   return c.toDataURL("image/jpeg", q);
 }

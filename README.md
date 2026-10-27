@@ -31,7 +31,8 @@ pipeline are deployed but switched off until their environment variables are set
 | Fix: Layout Studio crashed when the selected publication had no pages; screen-level error page | `a1870ca` | Done, live |
 | Design Studio (reference → design system → six format templates → issue): design spec with confidence and evidence, editable/confirmable design system, new-topic issue planner, constrained generation, issue QA (blocker/warning/info), bulk corrections with undo, parent pages/layers/named styles in InDesign, pilot time report, vitest suite | `3b24d88` | Done, live |
 | OpenAI-first AI provider (Anthropic fallback); optional AI assistant in the Content Library editor | `d1d39da`, `841d8a6` | Done, live |
-| Reorganised around the four production goals: sidebar groups (templates / placement / fitting & checks / corrections & export), goal dashboard on the Overview, bulk corrections on the QA screen, demo-only features removed (guided demo, hard-coded next action, separate "Create Like This" entry → Design Studio) | — | Built and tested locally; not yet committed or deployed |
+| Reorganised around the four production goals: sidebar groups (templates / placement / fitting & checks / corrections & export), goal dashboard on the Overview, bulk corrections on the QA screen, demo-only features removed (guided demo, hard-coded next action, separate "Create Like This" entry → Design Studio) | `f865980` | Done, live |
+| Design Studio: AI recognition pass on the reference (page types, section names, text-block roles via OpenAI vision, Anthropic fallback) — measurements stay rule-based; answers carry a confidence, are adopted only above 60 %, flagged when they differ from the rules, and feed template derivation | — | Built and tested locally; not yet committed or deployed |
 
 **Principle kept throughout:** the browser is for preparing, proofing and approving; only Adobe
 InDesign produces print files, and nothing reaches it unless the quality gates pass.
@@ -136,8 +137,15 @@ reached from the Content Library.
 
 ## Reference analysis (Design Studio, stage 1–2)
 
-Upload a reference magazine PDF in the **Design Studio**. Everything runs locally in the browser with
-pdf.js — the file is never uploaded.
+Upload a reference magazine PDF in the **Design Studio**. Measurement runs locally in the browser with
+pdf.js — the PDF is never uploaded. When an AI key is set on the server, a second pass sends each
+measured page as a small JPEG plus its measured text blocks to the model, which answers *what things
+are*: the page type, the section name and the role of each block (headline, deck, standfirst,
+caption, pull quote, byline, name, designation, kicker, question…). Nothing numeric comes from the AI.
+Each answer carries a confidence; the AI's page type is adopted above 60 %, otherwise the rules' type
+stands and the AI's view is shown as a second opinion; pages where the two disagree are flagged
+"differs" in the page map for confirmation, and an editor's manual correction is never overridden.
+Recognised roles guide template derivation (which block becomes the headline, deck, caption frame).
 
 - **Measured from the PDF:** trim and bleed (TrimBox/BleedBox, including PDFs that keep page
   dictionaries in compressed object streams), every font and point size, body size and leading,
@@ -162,7 +170,7 @@ pdf.js — the file is never uploaded.
 | QA fixes (place image, add metadata/caption, switch template, add continuation page, reset style/geometry, approve) | Real |
 | Exports: PDF proof (bleed + crop marks), web PDF, PNG page ZIP, JSON content package, InDesign handoff ZIP, print view (vector, via browser print) | Real downloadable files |
 | Design Studio — measurement of a reference PDF (boxes, type, grid, images, colour, sections) | Real, in-browser (pdf.js) |
-| Design Studio — page classification and style inference | Rule-based heuristics on measured data (labelled) |
+| Design Studio — page classification, section names, text-block roles | AI recognition (OpenAI vision; Claude fallback) when a key is set, labelled with confidence; rule-based heuristics otherwise |
 | "AI" — classification, summary, pull quotes, headlines | OpenAI (default) or Claude on the server when configured (server mode); otherwise deterministic local heuristics (labelled in the UI) |
 | "AI" — image opportunities, layout recommendation, trim proposals | Deterministic local heuristics |
 | Design Studio: design spec with confidence, format templates, issue planning, generation, issue QA, bulk corrections, pilot timings | Real, in-browser; InDesign build, print gates and release need server mode |

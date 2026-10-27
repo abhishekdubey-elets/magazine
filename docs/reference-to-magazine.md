@@ -2,6 +2,30 @@
 
 Route: `/reference-studio` (navigation: *Design Studio*, under "1 · Reusable templates"). Six stages on one screen.
 
+
+## AI recognition pass (stage 1–2)
+
+`src/lib/reference/recognize.ts` (shared, pure) builds the request — per page a 420 px JPEG render
+made during measurement (not stored), the measured text blocks (index, text start, size, bold, lines,
+position in % of the trim) and the rules' guess — in batches of 8 pages, and merges the answers:
+
+- page type adopted when confidence ≥ `AI_ADOPT_CONFIDENCE` (0.6) and the page was not corrected by
+  an editor; the rules' type stays in `detectedType`; `page.ai` records type, confidence, section,
+  reasons, `disagrees`, `adopted`;
+- block roles land on `RefTextBlock.role`; `derive.ts` prefers them when choosing headline, kicker,
+  deck, name/designation, caption, standfirst, pull quote and byline blocks (size sanity checks remain);
+- section names fill `runningHead` only where none was measured; sections are rebuilt;
+- `profile.ai` summarises provider, model, pages, disagreements and token usage.
+
+`src/server/ai/reference.ts` calls OpenAI chat completions with image inputs (`detail: "low"`) and a
+strict JSON schema, falling back to Claude with image blocks; `POST /api/ai/reference` validates
+sizes (≤ 12 pages, JPEG data URLs ≤ 400 KB), requires `use-ai` in server mode and is throttled per
+connection in demo mode (`AI_REFERENCE_DEMO=0` switches it off). Measurements are never sent to or
+returned from the model as values to adopt. Tests: `tests/ai-reference.test.ts`.
+To exercise the pass without a key: `node scripts/openai-mock.mjs 3999`, then run the app with
+`OPENAI_API_KEY=test OPENAI_BASE_URL=http://localhost:3999/v1`; the mock answers from the measured
+blocks (and flips one page to show the disagreement path).
+
 ## What it does
 
 1. **Reference** — upload an existing magazine PDF. Measured in the browser with pdf.js (page boxes, every positioned text run with font and size, image placements from the content stream, colours from rendered pages, running heads). Mixed page sizes, blank pages, missing TrimBox and scanned files are detected and reported; encrypted or unreadable files produce an actionable error. No OCR is available.

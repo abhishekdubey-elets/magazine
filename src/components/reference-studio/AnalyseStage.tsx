@@ -1,15 +1,16 @@
 "use client";
 
-import { AlertTriangle, ArrowRight, Info, LayoutTemplate, Palette, Ruler, Type } from "lucide-react";
+import { AlertTriangle, ArrowRight, Info, LayoutTemplate, Palette, Ruler, Sparkles, Type } from "lucide-react";
 import { useMemo, useState } from "react";
 import { fmtBytes, fmtDateTime } from "@/components/common";
 import { GridDiagram, PageDetail, TYPE_TONE } from "@/components/create/ReferenceReport";
 import { toast } from "@/components/shell/toast";
 import { Badge, Button, Card, CardHeader, cn, Select, SimLabel } from "@/components/ui";
 import { REF_TYPE_LABELS } from "@/lib/reference/derive";
+import { recognizeProfile, storedImages } from "@/lib/reference/recognize-client";
 import { chooseLayoutModel, deriveDesignSpec, FORMAT_LABEL, FORMATS, getFinding, rederiveSpec } from "@/lib/reference/spec";
 import { useStore } from "@/lib/store";
-import { useCan } from "@/lib/sync/engine";
+import { useCan, useWorkspace } from "@/lib/sync/engine";
 import type { ReferenceProfile, RefPage, RefPageType } from "@/lib/types";
 import { FindingCard } from "./findings";
 import { useStudio } from "./studio-state";
@@ -26,7 +27,23 @@ export function AnalyseStage({ profile }: { profile: ReferenceProfile }) {
   const spec = profile.spec ?? deriveDesignSpec(profile);
   const canEdit = useCan("edit-references");
   const setStage = useStudio((s) => s.setStage);
+  const aiProvider = useWorkspace((s) => s.setup?.ai.provider ?? null);
+  const [aiBusy, setAiBusy] = useState<string | null>(null);
   const [detail, setDetail] = useState<RefPage | null>(null);
+  const disagreements = profile.pages.filter((p) => p.ai?.disagrees);
+
+  const rerunAi = async () => {
+    setAiBusy("Starting");
+    try {
+      const next = await recognizeProfile(profile, storedImages(profile), { onProgress: (p) => setAiBusy(p.stage) });
+      useStore.getState().updateReference(profile.id, { pages: next.pages, sections: next.sections, ai: next.ai, spec: rederiveSpec(next) });
+      toast("success", "AI recognition complete", `${next.ai?.pages ?? 0} pages · ${next.ai?.disagreements.length ?? 0} differ from the rules`);
+    } catch (e) {
+      toast("error", "AI recognition failed", e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(null);
+    }
+  };
   const mix = useMemo(() => Object.entries(profile.pages.reduce<Record<string, number>>((m, p) => ((m[p.type] = (m[p.type] ?? 0) + 1), m), {})).sort((a, b) => b[1] - a[1]) as [RefPageType, number][], [profile.pages]);
   const open = (n: number) => {
     const p = profile.pages.find((x) => x.number === n);
@@ -56,6 +73,39 @@ export function AnalyseStage({ profile }: { profile: ReferenceProfile }) {
         <Button variant="primary" onClick={() => setStage("design")}>
           Review design system <ArrowRight />
         </Button>
+      </Card>
+
+      <Card className="flex flex-wrap items-center gap-x-5 gap-y-2 px-5 py-3">
+        <Sparkles className="size-4 text-ai" />
+        <div className="min-w-[260px] flex-1 text-[12.5px]">
+          {profile.ai ? (
+            <>
+              <p className="font-semibold text-ink">
+                Page types, sections and text roles recognised by {profile.ai.provider === "openai" ? "OpenAI" : "Claude"} <span className="font-normal text-muted">· {profile.ai.model} · {profile.ai.pages} pages · {fmtDateTime(profile.ai.at)}</span>
+              </p>
+              <p className="text-muted">
+                Measurements (trim, margins, columns, type sizes, fonts, image placements) are read from the PDF and never AI-derived.{" "}
+                {disagreements.length ? (
+                  <span className="text-warn">
+                    {disagreements.length} page{disagreements.length === 1 ? "" : "s"} where the AI and the rules disagree: {disagreements.map((p) => p.number).join(", ")} — open them in the page map to confirm.
+                  </span>
+                ) : (
+                  "The AI and the rules agree on every page."
+                )}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-semibold text-ink">Page types classified by rules</p>
+              <p className="text-muted">{aiProvider ? "Run the AI recognition pass to read page types, section names and text roles from the page images (confidence shown, correctable)." : "No AI provider key is set on the server; recognition uses size and position rules."}</p>
+            </>
+          )}
+        </div>
+        {aiProvider && canEdit && (
+          <Button variant="ai" size="sm" loading={!!aiBusy} onClick={() => void rerunAi()} title={profile.ai ? "Run again on the stored page previews" : "Recognise pages with the AI"}>
+            {!aiBusy && <Sparkles />} {aiBusy ?? (profile.ai ? "Run AI recognition again" : "Recognise with AI")}
+          </Button>
+        )}
       </Card>
 
       {(profile.notes.length > 0 || spec.review.warnings.length > 0) && (
@@ -170,7 +220,7 @@ export function AnalyseStage({ profile }: { profile: ReferenceProfile }) {
       </Card>
 
       <Card>
-        <CardHeader title="Page map" description="Every measured page with its detected type. Click a page to see the measured blocks and correct the type — the design spec is rebuilt, keeping your confirmed values." actions={<SimLabel>Heuristic classification</SimLabel>} />
+        <CardHeader title="Page map" description="Every measured page with its type. Click a page to see the measured blocks, the AI's reasons and roles, and correct the type — the design spec is rebuilt, keeping your confirmed values." actions={profile.ai ? <Badge tone="ai">AI recognised · rules compared</Badge> : <SimLabel>Heuristic classification</SimLabel>} />
         <div className="flex flex-wrap gap-3 px-5 pt-4 text-[11.5px]">
           {mix.map(([t, n]) => (
             <span key={t} className="flex items-center gap-1.5 text-ink-2">
@@ -184,10 +234,12 @@ export function AnalyseStage({ profile }: { profile: ReferenceProfile }) {
               <div className={cn("relative overflow-hidden rounded-sm border shadow-card transition group-hover:-translate-y-0.5 group-hover:shadow-pop", profile.oddSizes?.some((o) => o.number === p.number) ? "border-warn" : "border-line")} style={{ aspectRatio: `${profile.trim.width} / ${profile.trim.height}` }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 {p.thumb && <img src={p.thumb} alt="" className="size-full object-cover" />}
-                {p.type !== p.detectedType && <span className="absolute top-1 right-1 rounded bg-white/90 px-1 text-[9.5px] font-semibold text-brand">edited</span>}
+                {p.type !== p.detectedType && !p.ai?.adopted && <span className="absolute top-1 right-1 rounded bg-white/90 px-1 text-[9.5px] font-semibold text-brand">edited</span>}
+                {p.ai?.disagrees && <span className="absolute top-1 left-1 rounded bg-warn px-1 text-[9.5px] font-semibold text-white" title={`AI: ${REF_TYPE_LABELS[p.ai.type]} (${Math.round(p.ai.confidence * 100)}%) · rules: ${REF_TYPE_LABELS[p.detectedType]}`}>differs</span>}
               </div>
               <div className="mt-1.5 flex items-center gap-1 text-[11px]">
                 <span className="font-semibold text-ink-2">{p.number}</span>
+                {p.ai && <span className="text-[10px] text-ai" title="AI confidence">{Math.round(p.ai.confidence * 100)}%</span>}
                 <span className="ml-auto truncate rounded px-1 py-px font-medium text-white" style={{ background: TYPE_TONE[p.type] }}>
                   {REF_TYPE_LABELS[p.type]}
                 </span>

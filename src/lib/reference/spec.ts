@@ -224,7 +224,7 @@ export function deriveDesignSpec(profile: ReferenceProfile, previous?: DesignSpe
       confidence: derivation === "geometry" ? clamp(0.55 + (m.page?.confidence ?? 0) * 0.4) : derivation === "adapted" ? 0.5 : 0.3,
       note:
         derivation === "geometry"
-          ? `Frame geometry measured from reference page ${m.page!.number} (${m.kind})`
+          ? `Frame geometry measured from reference page ${m.page!.number} (${m.kind}${m.page!.ai?.adopted ? ", type recognised by the AI" : ""})`
           : derivation === "adapted"
             ? MEASURABLE_FORMATS.includes(format)
               ? `Reference page ${m.page!.number} (${m.kind}) has no clear headline/body structure — the house template is rescaled and restyled`
@@ -268,7 +268,13 @@ export function deriveDesignSpec(profile: ReferenceProfile, previous?: DesignSpe
     },
     images: imagesFinding(profile),
     structure: {
-      sections: finding(profile.sections, profile.sections.length ? bySamples(profile.sections.reduce((n, s) => n + s.pages.length, 0), 10, 0.45) : 0.2, profile.sections.length ? "inferred" : "default", profile.sections.flatMap((s) => s.pages), profile.sections.length ? "Repeated running heads" : "No repeating running heads — house sections"),
+      sections: finding(
+        profile.sections,
+        profile.sections.length ? bySamples(profile.sections.reduce((n, s) => n + s.pages.length, 0), 10, 0.45) : 0.2,
+        profile.sections.length ? (profile.ai && profile.pages.some((p) => p.ai?.section && p.runningHead === p.ai.section) ? "ai" : "inferred") : "default",
+        profile.sections.flatMap((s) => s.pages),
+        profile.sections.length ? (profile.ai ? "Running heads measured from the pages and section names read by the AI" : "Repeated running heads") : "No repeating running heads — house sections",
+      ),
       pageTypes: (Object.keys(models) as EditorialFormat[]).length
         ? [...new Set(profile.pages.map((p) => p.type))].map((type) => ({ type, pages: profile.pages.filter((p) => p.type === type).map((p) => p.number) }))
         : [],
@@ -405,6 +411,8 @@ export function describeSource(f: Finding<unknown>): string {
       return `Extracted from the PDF · ${pct}% confidence${f.evidence.length ? ` · p. ${f.evidence.slice(0, 6).join(", ")}${f.evidence.length > 6 ? "…" : ""}` : ""}`;
     case "inferred":
       return `Inferred from measurements · ${pct}% confidence${f.evidence.length ? ` · p. ${f.evidence.slice(0, 6).join(", ")}${f.evidence.length > 6 ? "…" : ""}` : ""}`;
+    case "ai":
+      return `Recognised by the AI from the page images · ${pct}% confidence${f.evidence.length ? ` · p. ${f.evidence.slice(0, 6).join(", ")}${f.evidence.length > 6 ? "…" : ""}` : ""}`;
     default:
       return `Default value (not found in the reference) · ${pct}% confidence`;
   }

@@ -8,8 +8,8 @@ import type { Finding, FindingSource, FurnitureSpec, TypeSpec } from "@/lib/type
 
 /** Shared presentation of one design-spec finding (read-only or with an editor). */
 
-export const SOURCE_TONE: Record<FindingSource, Tone> = { extracted: "ok", inferred: "brand", default: "warn", confirmed: "ok" };
-export const SOURCE_LABEL: Record<FindingSource, string> = { extracted: "Extracted", inferred: "Inferred", default: "Default", confirmed: "Confirmed" };
+export const SOURCE_TONE: Record<FindingSource, Tone> = { extracted: "ok", inferred: "brand", ai: "ai", default: "warn", confirmed: "ok" };
+export const SOURCE_LABEL: Record<FindingSource, string> = { extracted: "Extracted", inferred: "Inferred", ai: "AI recognised", default: "Default", confirmed: "Confirmed" };
 
 export function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);

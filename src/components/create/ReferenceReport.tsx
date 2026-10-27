@@ -15,6 +15,7 @@ import { makeContext, resolvePage } from "@/lib/layout-engine";
 import { routes } from "@/lib/nav";
 import { isFurniture } from "@/lib/reference/analyze";
 import { bestModels, buildFromReference, DERIVABLE, modelTemplate, REF_TYPE_LABELS } from "@/lib/reference/derive";
+import { ROLE_LABEL } from "@/lib/reference/recognize";
 import { useStore } from "@/lib/store";
 import type { Article, Page, ReferenceProfile, RefPage, RefPageType } from "@/lib/types";
 
@@ -384,11 +385,13 @@ export function PageDetail({ profile, page, onClose, onType }: { profile: Refere
             <div key={`i${i}`} className="absolute" style={{ ...box(r), outline: "1.5px solid #e07b24", background: "rgba(224,123,36,.08)" }} />
           ))}
           {page.blocks.map((b, i) => (
-            <div key={i} title={`${b.size}pt ${b.font} — ${b.text}`} className="absolute" style={{ ...box(b), outline: `1px solid ${colors[kind(b)]}`, background: `${colors[kind(b)]}14` }} />
+            <div key={i} title={`${b.role ? `${ROLE_LABEL[b.role]} (AI) · ` : ""}${b.size}pt ${b.font} — ${b.text}`} className="absolute" style={{ ...box(b), outline: `1px solid ${colors[kind(b)]}`, background: `${colors[kind(b)]}14` }}>
+              {b.role && b.role !== "body" && b.role !== "other" && <span className="absolute -top-1.5 left-0 rounded bg-ai px-1 text-[8px] leading-3 font-semibold text-white">{ROLE_LABEL[b.role]}</span>}
+            </div>
           ))}
         </div>
         <div className="min-w-0 flex-1 space-y-4 text-[13px]">
-          <Field label="Page type" htmlFor="ref-type" hint={`Detected: ${REF_TYPE_LABELS[page.detectedType]} (${Math.round(page.confidence * 100)}% confidence)`}>
+          <Field label="Page type" htmlFor="ref-type" hint={`Rules: ${REF_TYPE_LABELS[page.detectedType]} (${Math.round(page.confidence * 100)}%)${page.ai ? ` · AI: ${REF_TYPE_LABELS[page.ai.type]} (${Math.round(page.ai.confidence * 100)}%${page.ai.adopted ? ", adopted" : ", below the adoption threshold"})` : ""}`}>
             <Select id="ref-type" value={page.type} onChange={(e) => onType(e.target.value as RefPageType)}>
               {(Object.keys(REF_TYPE_LABELS) as RefPageType[]).map((t) => (
                 <option key={t} value={t}>
@@ -397,8 +400,22 @@ export function PageDetail({ profile, page, onClose, onType }: { profile: Refere
               ))}
             </Select>
           </Field>
+          {page.ai && (
+            <div className={page.ai.disagrees ? "rounded-md border border-[#f4dcb9] bg-warn-50 p-2.5" : "rounded-md border border-[#ddd6f8] bg-ai-50/50 p-2.5"}>
+              <p className="mb-1 text-[12px] font-medium text-ink">
+                AI recognition{page.ai.disagrees ? " — differs from the rules; please confirm the type" : ""}
+                {page.ai.section && <span className="font-normal text-muted"> · section “{page.ai.section}”</span>}
+              </p>
+              <ul className="space-y-0.5 text-ink-2">
+                {page.ai.reasons.map((r) => (
+                  <li key={r}>• {r}</li>
+                ))}
+              </ul>
+              {page.blocks.some((b) => b.role) && <p className="mt-1 text-[11.5px] text-muted">{page.blocks.filter((b) => b.role && b.role !== "body" && b.role !== "other").length} text blocks labelled with a role (purple tags on the page).</p>}
+            </div>
+          )}
           <div>
-            <p className="mb-1 text-[12px] font-medium text-muted">Why</p>
+            <p className="mb-1 text-[12px] font-medium text-muted">Why (rules)</p>
             <ul className="space-y-0.5 text-ink-2">
               {page.reasons.map((r) => (
                 <li key={r}>• {r}</li>
