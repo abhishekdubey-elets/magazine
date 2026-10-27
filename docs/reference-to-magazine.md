@@ -1,6 +1,6 @@
 # Reference-to-Magazine Studio — architecture, configuration, limits
 
-Route: `/reference-studio` (navigation: *Reference-to-Magazine Studio*). Six stages on one screen.
+Route: `/reference-studio` (navigation: *Design Studio*, under "1 · Reusable templates"). Six stages on one screen.
 
 ## What it does
 

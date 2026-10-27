@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   // Native / WASM server packages load from node_modules at runtime.
   serverExternalPackages: ["@electric-sql/pglite", "sharp", "fontkit", "postgres"],
+  // "Create Like This" became stage 1–2 of the Design Studio.
+  redirects: async () => [{ source: "/create", destination: "/reference-studio", permanent: true }],
   webpack: (config) => {
     // pdf.js references the optional Node "canvas" package; it is never used in the browser.
     config.resolve.alias = { ...config.resolve.alias, canvas: false };

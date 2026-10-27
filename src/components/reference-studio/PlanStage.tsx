@@ -131,7 +131,7 @@ export function PlanStage({ profile, publication }: { profile: ReferenceProfile;
         pilot.formatsTested = [...new Set(res.pages.map((p) => p.format).filter((f): f is EditorialFormat => !!f))];
         pilot.output = "browser-preview";
         useStore.getState().importBuild({ ...res, publication: { ...res.publication, pilot } });
-        useStore.getState().log({ kind: "layout", message: `Issue generated from the design system of “${profile.name}”: ${res.publication.title} — ${res.publication.issueLabel} (${res.pages.length} pages, ${res.templates.length} templates)`, actor: "PressFlow (Reference-to-Magazine Studio)", tone: "success" });
+        useStore.getState().log({ kind: "layout", message: `Issue generated from the design system of “${profile.name}”: ${res.publication.title} — ${res.publication.issueLabel} (${res.pages.length} pages, ${res.templates.length} templates)`, actor: "PressFlow (Design Studio)", tone: "success" });
         useStudio.setState({ publicationId: res.publication.id, stage: "build" });
         useStudio.getState().startTimer("qaMs");
         toast("success", "Issue generated", `${res.pages.length} pages · ${res.report[res.report.length - 1]}`);

@@ -73,7 +73,7 @@ export function ReferenceStudio() {
     <div className="mx-auto max-w-[1440px] space-y-5 p-6 lg:p-8">
       <PageHeader
         eyebrow={<Badge tone={serverMode ? "brand" : "neutral"}>{serverMode ? "Team workspace" : "Browser demo mode — InDesign builds need the server"}</Badge>}
-        title="Reference-to-Magazine Studio"
+        title="Design Studio"
         description="Learn the design system of an existing magazine, plan a new issue on a different topic, generate every page from reusable templates, check it, and build an editable InDesign document — without lowering print quality."
       />
 

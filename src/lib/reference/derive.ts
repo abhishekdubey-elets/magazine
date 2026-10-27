@@ -687,7 +687,7 @@ export function buildFromReference(profile: ReferenceProfile, articles: Article[
     issueLabel: opts.issueLabel.trim() || "New issue",
     issueDate: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10),
     stage: "layout",
-    description: `Modelled on “${profile.name}” (${profile.pageCount} pages, ${profile.trim.width} × ${profile.trim.height} mm) with Create Like This.`,
+    description: `Modelled on “${profile.name}” (${profile.pageCount} pages, ${profile.trim.width} × ${profile.trim.height} mm) in the Design Studio.`,
     website: "egov.eletsonline.com",
     tagline: "The ultimate resource for Governance Innovations",
     sections: [...refSections, ...houseSections],

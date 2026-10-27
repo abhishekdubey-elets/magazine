@@ -1,40 +1,28 @@
 "use client";
 
 import {
-  CheckCircle2,
-  ChevronDown,
   ChevronRight,
-  ChevronUp,
-  Circle,
-  CircleDot,
   Cloud,
   CloudOff,
-  Compass,
   LoaderCircle,
   LogOut,
   MonitorSmartphone,
   RotateCcw,
   Search,
-  X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { create } from "zustand";
 import { DEMO_USER, DEMO_USER_ROLE } from "@/data/seed";
-import { GUIDE_STEPS } from "@/lib/guide";
 import { useFontWatcher, useHydrated, usePublication, useQa } from "@/lib/hooks";
-import { NAV, navFor } from "@/lib/nav";
+import { NAV, NAV_GROUPS, navFor } from "@/lib/nav";
 import { useStore } from "@/lib/store";
 import { ROLE_LABEL } from "@/lib/roles";
 import { bootWorkspace, seedWorkspace, signOut, useWorkspace } from "@/lib/sync/engine";
-import { Badge, Button, cn, Modal, TipProvider } from "../ui";
+import { Button, cn, Modal, TipProvider } from "../ui";
 import { useInDesignPolling } from "../export/InDesignPanel";
 import { FixHost } from "../qa/FixHost";
 import { toast, Toaster } from "./toast";
-
-/** Routes visited in this browser session (for guide step detection). */
-export const useVisited = create<{ visited: string[] }>(() => ({ visited: [] }));
 
 export function AppShell({ children }: { children: ReactNode }) {
   const hydrated = useHydrated();
@@ -45,10 +33,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (pathname !== "/login") void bootWorkspace();
-  }, [pathname]);
-
-  useEffect(() => {
-    useVisited.setState((s) => (s.visited.includes(pathname) ? s : { visited: [...s.visited, pathname] }));
   }, [pathname]);
 
   // Conflicts and rejected edits from the sync engine.
@@ -88,7 +72,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           <main className="thin-scroll relative min-h-0 flex-1 overflow-y-auto">{hydrated ? children : <LoadingSkeleton />}</main>
         </div>
       </div>
-      {hydrated && <GuidePanel />}
       {hydrated && <FixHost />}
       <Toaster />
     </TipProvider>
@@ -117,7 +100,7 @@ function WorkspaceGate() {
             <h1 className="text-[17px] font-semibold text-ink">Set up the PressFlow workspace</h1>
             <p className="mt-2 text-[13px] text-ink-2">
               {admin
-                ? "The server database is empty. Start with the sample issue and the built-in templates; you can then build your own issues from them or with Create Like This."
+                ? "The server database is empty. Start with the sample issue and the built-in templates; you can then build your own issues from them or from a reference magazine in the Design Studio."
                 : "The server database is empty. An admin needs to set it up first."}
             </p>
             {err && <p className="mt-3 rounded-md bg-err-50 px-3 py-2 text-[12.5px] text-err">{err}</p>}
@@ -215,32 +198,34 @@ function Sidebar() {
       </Link>
 
       <nav className="thin-scroll flex-1 overflow-y-auto px-2.5 py-3" aria-label="Main">
-        <p className="px-2.5 pb-1.5 text-[11px] font-semibold tracking-wider text-faint uppercase max-lg:hidden">Workspace</p>
-        <ul className="space-y-0.5">
-          {NAV.map((item, i) => {
-            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-            const Icon = item.icon;
-            return (
-              <li key={item.href}>
-                {i === 3 && <div className="mx-2.5 my-2 border-t border-line" />}
-                {i === 9 && <div className="mx-2.5 my-2 border-t border-line" />}
-                <Link
-                  href={item.href}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium transition-colors",
-                    active ? "bg-brand-50 text-brand" : "text-ink-2 hover:bg-canvas hover:text-ink",
-                  )}
-                  title={item.label}
-                >
-                  <Icon className={cn("size-[17px] shrink-0", active ? "text-brand" : "text-muted")} />
-                  <span className="truncate max-lg:hidden">{item.label}</span>
-                  {item.href === "/qa" && hydrated && <QaCount />}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        {NAV_GROUPS.map((g) => (
+          <div key={g.id} className={cn(g.id !== "overview" && "mt-3")}>
+            {g.label && <p className="px-2.5 pb-1 text-[10.5px] font-semibold tracking-wider text-faint uppercase max-lg:hidden">{g.label}</p>}
+            <ul className="space-y-0.5">
+              {NAV.filter((n) => n.group === g.id).map((item) => {
+                const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+                const Icon = item.icon;
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium transition-colors",
+                        active ? "bg-brand-50 text-brand" : "text-ink-2 hover:bg-canvas hover:text-ink",
+                      )}
+                      title={item.description}
+                    >
+                      <Icon className={cn("size-[17px] shrink-0", active ? "text-brand" : "text-muted")} />
+                      <span className="truncate max-lg:hidden">{item.label}</span>
+                      {item.href === "/qa" && hydrated && <QaCount />}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
       </nav>
 
       {serverMode ? (
@@ -278,7 +263,6 @@ function Sidebar() {
               variant="danger"
               onClick={() => {
                 resetDemo();
-                useVisited.setState({ visited: [] });
                 setConfirmReset(false);
                 router.push("/");
                 toast("success", "Demo data restored", "Tech Maha Impact — May 2026 is back to its starting state.");
@@ -311,8 +295,6 @@ function Topbar() {
   const hydrated = useHydrated();
   const pub = usePublication();
   const nav = navFor(pathname);
-  const setGuide = useStore((s) => s.setGuide);
-  const guideOpen = useStore((s) => s.guide.open);
   const user = useWorkspace((s) => s.user);
   const [q, setQ] = useState("");
   return (
@@ -338,13 +320,6 @@ function Topbar() {
           className="h-8 w-full rounded-md border border-line bg-canvas pr-3 pl-8 text-[13px] placeholder:text-faint focus:border-brand focus:bg-white focus:outline-none"
         />
       </form>
-      <Button
-        size="sm"
-        variant={guideOpen ? "subtle" : "secondary"}
-        onClick={() => setGuide(guideOpen ? { open: false } : { open: true, startedAt: useStore.getState().guide.startedAt ?? new Date().toISOString() })}
-      >
-        <Compass /> Guided demo
-      </Button>
       <div className="flex items-center gap-2.5 border-l border-line pl-4">
         {user?.picture ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -363,77 +338,6 @@ function Topbar() {
         )}
       </div>
     </header>
-  );
-}
-
-function GuidePanel() {
-  const guide = useStore((s) => s.guide);
-  const setGuide = useStore((s) => s.setGuide);
-  const state = useStore();
-  const visited = useVisited((s) => s.visited);
-  const router = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
-  if (!guide.open) return null;
-  const done = GUIDE_STEPS.map((s) => s.done(state, visited));
-  const current = done.findIndex((d) => !d);
-  const complete = current === -1;
-  return (
-    <div className="fixed bottom-4 left-[260px] z-[55] w-[340px] rounded-xl border border-line bg-white shadow-pop max-lg:left-[84px]" role="dialog" aria-label="Guided demo">
-      <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-        <Compass className="size-4 text-brand" />
-        <p className="text-[13px] font-semibold text-ink">Guided demo</p>
-        <Badge tone={complete ? "ok" : "brand"}>
-          {done.filter(Boolean).length}/{GUIDE_STEPS.length}
-        </Badge>
-        <button className="ml-auto rounded p-1 text-muted hover:bg-canvas" aria-label={collapsed ? "Expand" : "Collapse"} onClick={() => setCollapsed(!collapsed)}>
-          {collapsed ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-        </button>
-        <button className="rounded p-1 text-muted hover:bg-canvas" aria-label="Close guided demo" onClick={() => setGuide({ open: false })}>
-          <X className="size-4" />
-        </button>
-      </div>
-      {!collapsed && (
-        <ol className="thin-scroll max-h-[52vh] overflow-y-auto p-2">
-          {GUIDE_STEPS.map((s, i) => {
-            const active = i === current;
-            return (
-              <li key={s.title} className={cn("rounded-lg px-2.5 py-2", active && "bg-brand-50")}>
-                <div className="flex items-start gap-2.5">
-                  {done[i] ? (
-                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-ok" />
-                  ) : active ? (
-                    <CircleDot className="mt-0.5 size-4 shrink-0 text-brand" />
-                  ) : (
-                    <Circle className="mt-0.5 size-4 shrink-0 text-faint" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className={cn("text-[13px] font-medium", done[i] ? "text-muted line-through decoration-faint" : "text-ink")}>
-                      {i + 1}. {s.title}
-                    </p>
-                    {active && (
-                      <>
-                        <p className="mt-1 text-[12.5px] leading-snug text-ink-2">{s.body}</p>
-                        <Button size="sm" variant="primary" className="mt-2" onClick={() => router.push(s.href)}>
-                          {s.cta}
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-          {complete && (
-            <li className="px-2.5 py-3 text-center">
-              <p className="text-[13px] font-semibold text-ok">Walkthrough complete</p>
-              <Button size="sm" variant="ghost" className="mt-1" onClick={() => setGuide({ startedAt: new Date().toISOString() })}>
-                Restart checks
-              </Button>
-            </li>
-          )}
-        </ol>
-      )}
-    </div>
   );
 }
 

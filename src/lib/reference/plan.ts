@@ -342,7 +342,7 @@ export function generateIssue(plan: IssuePlan, input: PlanInput, fontsVersion: n
     issueLabel: plan.issueLabel,
     issueDate: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10),
     stage: "layout",
-    description: `${plan.topic ? `${plan.topic}. ` : ""}Designed like “${input.profile.name}” (design spec v${spec.version}) with Reference-to-Magazine Studio.`,
+    description: `${plan.topic ? `${plan.topic}. ` : ""}Designed like “${input.profile.name}” (design spec v${spec.version}) in the Design Studio.`,
     website: "egov.eletsonline.com",
     tagline: "The ultimate resource for Governance Innovations",
     sections,

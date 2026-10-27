@@ -23,13 +23,15 @@ pipeline are deployed but switched off until their environment variables are set
 | Milestone | Commit | State |
 | --- | --- | --- |
 | Product demo: content library, AI preparation, Layout Studio, QA with fixes, Export Center, templates, settings, guided demo | `5393855` | Done, live |
-| Create Like This: analyse a reference magazine PDF in the browser and build a similar issue | `5393855` | Done, live |
+| Reference analysis: measure a reference magazine PDF in the browser and build a similar issue (now stage 1–2 of the Design Studio) | `5393855` | Done, live |
 | Automated print pipeline on the Adobe InDesign API: build manifest, ExtendScript build script, S3 staging, PDF/X + INDD + IDML + page previews, preflight report | `256071a`, `2c82b41` | Built; needs Adobe + S3 credentials |
 | Team backend: Postgres, Google Workspace sign-in, roles, shared workspace with conflict protection, audit trail, article history | `e3b4c79` | Built; needs `DATABASE_URL` + sign-in settings |
 | Print-quality protection: server-stamped approvals, pre-build gates, untouched image originals, licensed-font checks, archived outputs, editor release sign-off | `e3b4c79` | Built; gates work without Adobe, builds need Adobe |
 | Server AI (OpenAI by default, Anthropic as fallback) with stored proposals and accept/reject log | `e3b4c79` | Built; uses built-in rules until `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is set |
 | Fix: Layout Studio crashed when the selected publication had no pages; screen-level error page | `a1870ca` | Done, live |
-| Reference-to-Magazine Studio: design spec with confidence and evidence, editable/confirmable design system, six format templates, new-topic issue planner, constrained generation, issue QA (blocker/warning/info), bulk corrections with undo, parent pages/layers/named styles in InDesign, pilot time report, vitest suite | — | Built and tested locally; not yet committed or deployed |
+| Design Studio (reference → design system → six format templates → issue): design spec with confidence and evidence, editable/confirmable design system, new-topic issue planner, constrained generation, issue QA (blocker/warning/info), bulk corrections with undo, parent pages/layers/named styles in InDesign, pilot time report, vitest suite | `3b24d88` | Done, live |
+| OpenAI-first AI provider (Anthropic fallback); optional AI assistant in the Content Library editor | `d1d39da`, `841d8a6` | Done, live |
+| Reorganised around the four production goals: sidebar groups (templates / placement / fitting & checks / corrections & export), goal dashboard on the Overview, bulk corrections on the QA screen, demo-only features removed (guided demo, hard-coded next action, separate "Create Like This" entry → Design Studio) | — | Built and tested locally; not yet committed or deployed |
 
 **Principle kept throughout:** the browser is for preparing, proofing and approving; only Adobe
 InDesign produces print files, and nothing reaches it unless the quality gates pass.
@@ -85,7 +87,7 @@ and run **Export Center → Check print readiness** followed by a first print bu
   copy and they are told; there is no merge of simultaneous edits.
 - Vercel Hobby runs the archive cron once a day; builds are otherwise finalised when someone has the
   Export Center open.
-- The demo data and Create Like This analyses in demo mode live only in the browser (localStorage).
+- The demo data and reference analyses in demo mode live only in the browser (localStorage).
 - `scripts/indesign-mock.mjs` has four ESLint style errors (test tooling only).
 - The code is not yet in a hosted Git repository; deploys are made from this machine with the
   Vercel CLI.
@@ -116,12 +118,25 @@ npx tsc --noEmit             # type check
 npm test                     # vitest unit and integration tests
 ```
 
-Demo state is saved in the browser (localStorage). Use **Reset demo data** in the sidebar to start over,
-and **Guided demo** in the top bar for the eight-step stakeholder walkthrough.
+Demo state is saved in the browser (localStorage). Use **Reset demo data** in the sidebar to start over.
 
-## Create Like This
+## Navigation — the four production goals
 
-Upload a reference magazine PDF on **Create Like This**. Everything runs locally in the browser with
+The sidebar is grouped by goal, and the Overview shows live status for each:
+
+| Goal | Screens |
+|---|---|
+| 1 · Reusable templates for interviews, articles, government perspectives, event reports, news pages and company profiles, following the house design | **Design Studio** (learn a reference magazine, confirm the design system, build the six format templates, plan and generate an issue), **Templates** |
+| 2 · Automated text and image placement with headline, body, caption and quote styles | **Content Library**, **Layout Studio** (InDesign builds apply the same named paragraph styles) |
+| 3 · Content fitting — overflowing text, missing images, formatting inconsistencies | **Quality Assurance** |
+| 4 · Bulk corrections and PDF export | **Quality Assurance → Bulk corrections**, **Export Center** |
+
+`/create` redirects to the Design Studio; the optional AI Content Preparation screen (`/prepare`) is
+reached from the Content Library.
+
+## Reference analysis (Design Studio, stage 1–2)
+
+Upload a reference magazine PDF in the **Design Studio**. Everything runs locally in the browser with
 pdf.js — the file is never uploaded.
 
 - **Measured from the PDF:** trim and bleed (TrimBox/BleedBox, including PDFs that keep page
@@ -146,11 +161,11 @@ pdf.js — the file is never uploaded.
 | Quality assurance checks (overflow, missing images/headlines/authors/captions, resolution, frame fill, style overrides, margins, approval, imposition) | Real, computed from page data — a browser preflight, not an InDesign/PDF-X preflight |
 | QA fixes (place image, add metadata/caption, switch template, add continuation page, reset style/geometry, approve) | Real |
 | Exports: PDF proof (bleed + crop marks), web PDF, PNG page ZIP, JSON content package, InDesign handoff ZIP, print view (vector, via browser print) | Real downloadable files |
-| Create Like This — measurement of a reference PDF (boxes, type, grid, images, colour, sections) | Real, in-browser (pdf.js) |
-| Create Like This — page classification and style inference | Rule-based heuristics on measured data (labelled) |
+| Design Studio — measurement of a reference PDF (boxes, type, grid, images, colour, sections) | Real, in-browser (pdf.js) |
+| Design Studio — page classification and style inference | Rule-based heuristics on measured data (labelled) |
 | "AI" — classification, summary, pull quotes, headlines | OpenAI (default) or Claude on the server when configured (server mode); otherwise deterministic local heuristics (labelled in the UI) |
 | "AI" — image opportunities, layout recommendation, trim proposals | Deterministic local heuristics |
-| Reference-to-Magazine Studio: design spec with confidence, format templates, issue planning, generation, issue QA, bulk corrections, pilot timings | Real, in-browser; InDesign build, print gates and release need server mode |
+| Design Studio: design spec with confidence, format templates, issue planning, generation, issue QA, bulk corrections, pilot timings | Real, in-browser; InDesign build, print gates and release need server mode |
 | Team workspace, sign-in, roles, approvals, audit trail | Real when `DATABASE_URL` is set (server mode); browser-only demo otherwise |
 | Layout generation progress | Simulated service latency around the real engine |
 | Print-ready PDF/X, `.indd`, `.idml`, Adobe preflight | Real, via the Adobe InDesign API once configured (see below) |
@@ -205,7 +220,7 @@ drizzle/               SQL migrations
 Article bodies are plain text with a blank line between paragraphs. Interviews use `Q:` / `A:` prefixes;
 `## ` starts a sub-heading.
 
-## Reference-to-Magazine Studio
+## Design Studio
 
 Route `/reference-studio`. Learn the design system of an existing magazine, plan a new issue on a
 different topic, generate every page from reusable templates, check it and build it in InDesign.

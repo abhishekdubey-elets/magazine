@@ -115,7 +115,7 @@ export default function TemplatesPage() {
                 </div>
                 {t.referenceId && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <Badge tone="ai">Create Like This · {t.derivation === "geometry" ? `measured from p.${t.sourcePage}` : "adapted"}</Badge>
+                    <Badge tone="ai">Design Studio · {t.derivation === "geometry" ? `measured from p.${t.sourcePage}` : "adapted"}</Badge>
                     <Badge>{t.trim?.width} × {t.trim?.height} mm</Badge>
                   </div>
                 )}

@@ -34,8 +34,7 @@ export interface DemoState {
   qaRuns: QARun[];
   settings: Settings;
   activePublicationId: string;
-  guide: { open: boolean; step: number; startedAt?: string };
-  /** Analysed reference magazines (Create Like This). Newest first, max 2 (thumbnails are stored). */
+  /** Analysed reference magazines (Design Studio). Newest first, max 2 (thumbnails are stored). */
   references: ReferenceProfile[];
 }
 
@@ -61,7 +60,6 @@ interface Actions {
   updateTemplate: (id: string, patch: Partial<Template>) => void;
   duplicateTemplate: (id: string) => string | undefined;
   updateSettings: (patch: Partial<Settings>) => void;
-  setGuide: (g: Partial<DemoState["guide"]>) => void;
   addReference: (r: ReferenceProfile) => void;
   updateReference: (id: string, patch: Partial<ReferenceProfile>) => void;
   deleteReference: (id: string) => void;
@@ -125,7 +123,6 @@ export const initialState = (): DemoState => ({
   qaRuns: [],
   settings: structuredClone(defaultSettings),
   activePublicationId: PUBLICATION_ID,
-  guide: { open: false, step: 0 },
   references: [],
 });
 
@@ -337,7 +334,6 @@ export const useStore = create<Store>()(
         },
 
         updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
-        setGuide: (g) => set((s) => ({ guide: { ...s.guide, ...g } })),
 
         // Browser storage keeps the last 2 analyses (thumbnails are large); the server keeps 10.
         addReference: (r) => set((s) => ({ references: [r, ...s.references.filter((x) => x.id !== r.id)].slice(0, serverBacked ? 10 : 2) })),

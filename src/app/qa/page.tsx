@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { fmtDateTime, PageHeader, SEVERITY } from "@/components/common";
 import { PageThumb } from "@/components/page/PageRenderer";
+import { BULK_FOR_CHECK, BulkCorrections, useBulkRequest } from "@/components/qa/BulkCorrections";
 import { FIX_LABELS, useRunFix } from "@/components/qa/FixHost";
+import { BULK_LABEL } from "@/lib/bulk-fixes";
 import { toast } from "@/components/shell/toast";
 import { Badge, Button, Card, CardHeader, cn, Segmented, Select } from "@/components/ui";
 import { useQa } from "@/lib/hooks";
@@ -29,6 +31,7 @@ export default function QaPage() {
   const record = useStore((s) => s.recordQaRun);
   const log = useStore((s) => s.log);
   const runFix = useRunFix();
+  const requestBulk = useBulkRequest((s) => s.request);
   const [sev, setSev] = useState<"open" | Severity | "all">("open");
   const [check, setCheck] = useState("");
   const [page, setPage] = useState("");
@@ -63,7 +66,7 @@ export default function QaPage() {
     <div className="mx-auto max-w-[1400px] space-y-5 p-6 lg:p-8">
       <PageHeader
         title="Quality Assurance"
-        description="Browser preflight computed from live page data — templates, content, overrides and text-fit measurement. It approximates, and does not replace, InDesign preflight and PDF/X print validation."
+        description="Content fitting, overflowing text, missing images and formatting consistency, computed live from the templates, content and text-fit measurement of every page. Fix findings one by one or in bulk. Colour, fonts and PDF/X conformance are checked by InDesign at build time."
         actions={
           <Button variant="primary" onClick={rerun} loading={running}>
             {!running && <RefreshCw />} Re-run QA
@@ -143,13 +146,30 @@ export default function QaPage() {
           ) : (
             <ul className="divide-y divide-line">
               {shown.map((i) => (
-                <IssueRow key={i.id} i={i} onOpen={() => router.push(routes.studio(i.pageId, i.frameId))} onFix={(f) => runFix(i, f)} />
+                <IssueRow
+                  key={i.id}
+                  i={i}
+                  onOpen={() => router.push(routes.studio(i.pageId, i.frameId))}
+                  onFix={(f) => runFix(i, f)}
+                  onBulk={
+                    BULK_FOR_CHECK[i.check]
+                      ? () => {
+                          const op = BULK_FOR_CHECK[i.check]!;
+                          requestBulk(op, [...new Set(issues.filter((x) => x.check === i.check && x.severity !== "passed").map((x) => x.pageId))]);
+                          document.getElementById("bulk")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }
+                      : undefined
+                  }
+                />
               ))}
             </ul>
           )}
         </Card>
 
         <div className="space-y-5">
+          <div id="bulk" className="scroll-mt-4">
+            <BulkCorrections ctx={ctx} />
+          </div>
           <Card>
             <CardHeader title="Pages" description="Open errors and warnings per page" />
             <ul className="thin-scroll grid max-h-[560px] grid-cols-3 gap-3 overflow-y-auto p-4">
@@ -184,7 +204,7 @@ export default function QaPage() {
   );
 }
 
-function IssueRow({ i, onOpen, onFix }: { i: QAIssue; onOpen: () => void; onFix: (f: QAIssue["fixes"][number]) => void }) {
+function IssueRow({ i, onOpen, onFix, onBulk }: { i: QAIssue; onOpen: () => void; onFix: (f: QAIssue["fixes"][number]) => void; onBulk?: () => void }) {
   return (
     <li className="group flex items-start gap-3 px-4 py-3 hover:bg-canvas/70">
       <span className="mt-0.5">{ICON[i.severity]}</span>
@@ -198,13 +218,18 @@ function IssueRow({ i, onOpen, onFix }: { i: QAIssue; onOpen: () => void; onFix:
         </div>
         <p className="mt-0.5 text-[12.5px] text-muted">{i.description}</p>
         {i.suggestion && i.severity !== "passed" && <p className="mt-1 text-[12.5px] text-ink-2">Suggested fix: {i.suggestion}</p>}
-        {i.fixes.length > 0 && (
+        {(i.fixes.length > 0 || (onBulk && i.severity !== "passed")) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {i.fixes.map((f) => (
               <Button key={f.type} size="sm" variant="subtle" className="h-7" onClick={() => onFix(f)}>
                 {FIX_LABELS[f.type]}
               </Button>
             ))}
+            {onBulk && i.severity !== "passed" && (
+              <Button size="sm" variant="ghost" className="h-7" onClick={onBulk}>
+                Fix in bulk: {BULK_LABEL[BULK_FOR_CHECK[i.check]!]}
+              </Button>
+            )}
           </div>
         )}
       </div>
